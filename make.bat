@@ -1,0 +1,3 @@
+@echo off
+if not exist "build" mkdir build
+go build -o build/ ./...

@@ -1,0 +1,14 @@
+Ball() (pos: int)
+Ball(pos: int)
+Add(a: int, b: int) (result: int)
+
+main() {
+    start = Ball()
+    newPos = Add(a: start, b: 10)
+    Ball(pos: b)
+}
+
+main() {
+    Ball(x: Ball().y + 10)
+    Ball(y: Ball().x + 10)
+}

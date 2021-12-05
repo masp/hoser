@@ -1,0 +1,12 @@
+If each block executes based on whether all its inputs are met, we have the following possible features:
+- Blocks could arbitrarily generate outputs and be more complicated
+
+Disadvantages:
+- Scheduler is more complicated and has to handle arbitrary generators
+- Dependencies between time-based dependencies is harder to express (draw a line between blocks even though no input is passed?)
+- Time based sequences are hard to express and are important for games
+
+If we use semi-synchronous dataflow with time based scheduling constraints (block A must fire before block B):
+- Scheduler is a lot simpler (can be reduced to a single schedule)
+- Time based sequences are easier to express
+- Easier to use and understand coming from normal programming languages
