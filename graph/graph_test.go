@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/masp/hoser/ast"
 	"github.com/masp/hoser/lexer"
 	"github.com/masp/hoser/parser"
 )
@@ -69,8 +70,8 @@ main() {
 					"B": {},
 					"main": {
 						Nodes: []Node{
-							ConstNode{Value: &parser.Float{Token: lexer.Token{Kind: lexer.Float, Value: "10.2", Line: 5, Col: 7}, Value: 10.2}},
-							ConstNode{Value: &parser.String{Token: lexer.Token{Kind: lexer.String, Value: "Hello", Line: 5, Col: 16}}},
+							ConstNode{Value: &ast.Float{Token: lexer.Token{Kind: lexer.Float, Value: "10.2", Line: 5, Col: 7}, Value: 10.2}},
+							ConstNode{Value: &ast.String{Token: lexer.Token{Kind: lexer.String, Value: "Hello", Line: 5, Col: 16}}},
 							BlockNode{"B"},
 						},
 						Edges: []Edge{
@@ -149,7 +150,7 @@ A(a: int) (o: int, o2: int) {
 					"A": {
 						Nodes: []Node{
 							BlockNode{"B"},
-							ConstNode{Value: &parser.Float{Token: lexer.Token{Kind: lexer.Float, Value: "10.2", Line: 5, Col: 21}, Value: 10.2}},
+							ConstNode{Value: &ast.Float{Token: lexer.Token{Kind: lexer.Float, Value: "10.2", Line: 5, Col: 21}, Value: 10.2}},
 						},
 						Edges: []Edge{
 							{-1, 0, 0, 0},
@@ -164,7 +165,7 @@ A(a: int) (o: int, o2: int) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tokens, errCh := lexer.Scan(tt.args.moduleSrc)
-			module, err := parser.Scan(tokens, errCh)
+			module, err := parser.ParseModule(tokens, errCh)
 			if err != nil {
 				t.Error(err)
 				return

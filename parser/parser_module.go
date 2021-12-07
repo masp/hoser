@@ -3,12 +3,13 @@ package parser
 import (
 	"fmt"
 
+	"github.com/masp/hoser/ast"
 	"github.com/masp/hoser/lexer"
 )
 
-func (s *parserState) parseModule() (*Module, error) {
-	module := &Module{
-		Blocks: make(map[string]*Block),
+func (s *parserState) parseModule() (*ast.Module, error) {
+	module := &ast.Module{
+		Blocks: make(map[string]*ast.Block),
 	}
 
 	for {
@@ -17,7 +18,7 @@ func (s *parserState) parseModule() (*Module, error) {
 			// no more functions
 			return module, nil
 		}
-		fn, err := s.parseFunction()
+		fn, err := s.parseBlock()
 		if err != nil {
 			return nil, fmt.Errorf("%v:%v: syntax error at %v: %w", s.nextToken.Line, s.nextToken.Col, s.nextToken.Value, err)
 		}

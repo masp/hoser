@@ -1,4 +1,4 @@
-package parser
+package ast
 
 import (
 	"fmt"
@@ -42,8 +42,8 @@ func (m *Module) String() string {
 
 type Block struct {
 	Name    *Identifier
-	Inputs  *Map
-	Outputs *Map
+	Inputs  []Port
+	Outputs []Port
 	Body    []Expression
 }
 
@@ -57,13 +57,23 @@ func (f *Block) String() string {
 
 	sb.WriteString("(")
 	if f.Inputs != nil {
-		sb.WriteString(f.Inputs.String())
+		for _, port := range f.Inputs {
+			sb.WriteString(port.Name)
+			sb.WriteString(": ")
+			sb.WriteString(port.Type.Token.Value)
+			sb.WriteString(", ")
+		}
 	}
 	sb.WriteString(")")
 
 	if f.Outputs != nil {
 		sb.WriteString(" (")
-		sb.WriteString(f.Outputs.String())
+		for _, port := range f.Inputs {
+			sb.WriteString(port.Name)
+			sb.WriteString(": ")
+			sb.WriteString(port.Type.Token.Value)
+			sb.WriteString(", ")
+		}
 		sb.WriteString(")")
 	}
 
@@ -77,6 +87,11 @@ func (f *Block) String() string {
 	}
 
 	return sb.String()
+}
+
+type Port struct {
+	Name string
+	Type Type
 }
 
 type Expression interface {
@@ -218,6 +233,18 @@ func (r *Return) Span() (lexer.Token, lexer.Token) {
 
 func (r *Return) String() string {
 	return fmt.Sprintf("return %s", r.Value.String())
+}
+
+type Type struct {
+	Token lexer.Token
+}
+
+func (t *Type) Span() (lexer.Token, lexer.Token) {
+	return t.Token, t.Token
+}
+
+func (t *Type) String() string {
+	return fmt.Sprintf("return %s", t.Token.Value)
 }
 
 func PrintTokenAst(node Node, indent int) string {

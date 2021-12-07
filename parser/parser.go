@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/masp/hoser/ast"
 	"github.com/masp/hoser/lexer"
 )
 
@@ -18,13 +19,22 @@ var (
 	ErrExpectedExpression = errors.New("expected expression")
 )
 
-func Scan(tokens <-chan lexer.Token, errCh chan error) (*Module, error) {
+func ParseModule(fileSrc string) (*ast.Module, error) {
+	tokens, errCh := lexer.Scan(fileSrc)
 	s := parserState{
 		tokens: tokens,
 		errCh:  errCh,
 	}
-
 	return s.parseModule()
+}
+
+func ParseBlock(src string) (*ast.Block, error) {
+	tokens, errCh := lexer.Scan(src)
+	s := parserState{
+		tokens: tokens,
+		errCh:  errCh,
+	}
+	return s.parseBlock()
 }
 
 func (s *parserState) fetchToken() (lexer.Token, error) {
@@ -107,7 +117,7 @@ func precedence(kind lexer.TokenKind) int {
 	}
 }
 
-func (s *parserState) parseExpression(parent lexer.TokenKind) (Expression, error) {
+func (s *parserState) parseExpression(parent lexer.TokenKind) (ast.Expression, error) {
 	left, err := s.parsePrefix()
 	if err != nil {
 		return nil, err
@@ -130,7 +140,7 @@ func (s *parserState) parseExpression(parent lexer.TokenKind) (Expression, error
 	}
 }
 
-func (s *parserState) parsePrefix() (Expression, error) {
+func (s *parserState) parsePrefix() (ast.Expression, error) {
 	token, err := s.eat()
 	if err != nil {
 		return nil, err
@@ -149,12 +159,14 @@ func (s *parserState) parsePrefix() (Expression, error) {
 		return s.parseFloat(token)
 	case lexer.Return:
 		return s.parseReturn(token)
+	case lexer.IntType, lexer.StringType:
+		return &ast.Type{Token: token}, nil
 	default:
-		return nil, ErrExpectedExpression
+		return nil, fmt.Errorf("expected expression got %v", token.Kind)
 	}
 }
 
-func (s *parserState) parseInfixExpr(left Expression) (Expression, error) {
+func (s *parserState) parseInfixExpr(left ast.Expression) (ast.Expression, error) {
 	token, err := s.eat()
 	if err != nil {
 		return nil, err

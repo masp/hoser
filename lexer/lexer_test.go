@@ -3,6 +3,8 @@ package lexer
 import (
 	"reflect"
 	"testing"
+
+	"github.com/masp/hoser/token"
 )
 
 func TestReadAll(t *testing.T) {
@@ -12,51 +14,78 @@ func TestReadAll(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    []Token
+		want    []token.Token
 		wantErr bool
 	}{
-		{"All whitespace", args{"	 \r\n\r\n"}, []Token{}, false},
-		{"Standard identifier", args{"A5_t"}, []Token{
-			{Kind: Ident, Value: "A5_t", Line: 1, Col: 1},
+		{"All whitespace", args{"	 \r\n\r\n"}, []token.Token{}, false},
+		{"Standard identifier", args{"A5_t"}, []token.Token{
+			token.Ident,
 		}, false},
-		{"Invalid identifier", args{"\\5A"}, []Token{}, true},
-		{"Columns & Lines Correct", args{"t1 t2\nt3"}, []Token{
-			{Kind: Ident, Value: "t1", Line: 1, Col: 1},
-			{Kind: Ident, Value: "t2", Line: 1, Col: 4},
-			{Kind: Semicolon, Value: "", Line: 1, Col: 6},
-			{Kind: Ident, Value: "t3", Line: 2, Col: 1},
+		{"Invalid identifier", args{"\\5A"}, []token.Token{}, true},
+		{"Columns & Lines Correct", args{"t1 t2\nt3"}, []token.Token{
+			token.Ident,
+			token.Ident,
+			token.Semicolon,
+			token.Ident,
 		}, false},
-		{"Operators supported", args{"{}()=;:,"}, []Token{
-			{Kind: LCurlyBrack, Value: "{", Line: 1, Col: 1},
-			{Kind: RCurlyBrack, Value: "}", Line: 1, Col: 2},
-			{Kind: LParen, Value: "(", Line: 1, Col: 3},
-			{Kind: RParen, Value: ")", Line: 1, Col: 4},
-			{Kind: Equals, Value: "=", Line: 1, Col: 5},
-			{Kind: Semicolon, Value: ";", Line: 1, Col: 6},
-			{Kind: Colon, Value: ":", Line: 1, Col: 7},
-			{Kind: Comma, Value: ",", Line: 1, Col: 8},
+		{"Operators supported", args{"{}()=;:,"}, []token.Token{
+			token.LCurlyBrack,
+			token.RCurlyBrack,
+			token.LParen,
+			token.RParen,
+			token.Equals,
+			token.Semicolon,
+			token.Colon,
+			token.Comma,
 		}, false},
-		{"Semicolon inserts", args{"}\n)\nA\n"}, []Token{
-			{Kind: RCurlyBrack, Value: "}", Line: 1, Col: 1},
-			{Kind: Semicolon, Value: "", Line: 1, Col: 2},
-			{Kind: RParen, Value: ")", Line: 2, Col: 1},
-			{Kind: Semicolon, Value: "", Line: 2, Col: 2},
-			{Kind: Ident, Value: "A", Line: 3, Col: 1},
-			{Kind: Semicolon, Value: "", Line: 3, Col: 2},
+		{"Semicolon inserts", args{"}\n)\nA\n"}, []token.Token{
+			token.RCurlyBrack,
+			token.Semicolon,
+			token.RParen,
+			token.Semicolon,
+			token.Ident,
+			token.Semicolon,
 		}, false},
-		{"Integer", args{"13509185"}, []Token{{Kind: Integer, Value: "13509185", Line: 1, Col: 1}}, false},
-		{"Float", args{"1.2"}, []Token{{Kind: Float, Value: "1.2", Line: 1, Col: 1}}, false},
-		{"Float Exponential", args{"1.2e10"}, []Token{{Kind: Float, Value: "1.2e10", Line: 1, Col: 1}}, false},
-		{"String", args{`"hello\n\"there"`}, []Token{{Kind: String, Value: "hello\n\"there", Line: 1, Col: 1}}, false},
-		{"Return", args{"return"}, []Token{{Kind: Return, Value: "return", Line: 1, Col: 1}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ScanAll(tt.args.text)
+			src := []byte(tt.args.text)
+			file := token.NewFile("<unknown>", len(src))
+			got, err := ScanAll(&file, src)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ScanAll() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ScanAll() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTokens(t *testing.T) {
+	tests := []struct {
+		name      string
+		tokenText string
+		want      token.Token
+	}{
+		{"Integer", "13509185", token.Integer},
+		{"Float", "1.2", token.Float},
+		{"Float Exponential", "1.2e10", token.Float},
+		{"String", `"hello\n\"there"`, token.String},
+		{"Return", "return", token.Return},
+		{"Int Type", "int", token.IntType},
+		{"String Type", "string", token.StringType},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := []byte(tt.tokenText)
+			file := token.NewFile("<unknown>", len(src))
+			got, err := ScanAll(&file, src)
+			if err != nil {
+				t.Error(err)
+			}
+
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ScanAll() = %v, want %v", got, tt.want)
 			}

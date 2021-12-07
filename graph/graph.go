@@ -3,6 +3,7 @@ package graph
 import (
 	"fmt"
 
+	"github.com/masp/hoser/ast"
 	"github.com/masp/hoser/parser"
 )
 
@@ -40,6 +41,29 @@ import (
 type PortIdx int
 type NodeIdx int
 
+var (
+	IntBlock, StringBlock *ast.Block
+)
+
+func init() {
+	var err error
+	if IntBlock, err = parser.ParseBlock("Int() (v: int)"); err != nil {
+		panic(err)
+	}
+
+	if StringBlock, err = parser.ParseBlock("String() (v: string)"); err != nil {
+		panic(err)
+	}
+}
+
+// RootNode is the node index referring to the root block or the owner block
+// Example:
+// main() {
+//   a()
+// }
+// in this main() is the root block that has zero outputs and zero inputs but contains the a() block.
+const RootNode NodeIdx = -1
+
 // Definition is a DAG representation of a block's body where each node represents a "block" to be executed with an ordered set of input and output ports. These ports
 // are labeled 0-N. Each node contains information about all its inputs and outputs, which are referenced by their indices. A graph component
 // is created for each block defined in the module.
@@ -48,8 +72,16 @@ type NodeIdx int
 // The downside is that the program graph is difficult to modify in place (all indices change if anything is added or removed). Since most programs are
 // smaller, though, it is not too expensive to recalculate the whole graph each time.
 type Definition struct {
-	Nodes []Node // the sequence of blocks. the indices of each node is used to lookup
-	Edges []Edge // edges connecting two nodes
+	RootBlock string // RootBlock is the name of the block this definition represents
+	Nodes     []Node // the sequence of blocks. the indices of each node is used to lookup
+	Edges     []Edge // edges connecting two nodes
+}
+
+func (def *Definition) getNode(idx NodeIdx) Node {
+	if idx == RootNode {
+		return BlockNode{def.RootBlock}
+	}
+	return def.Nodes[idx]
 }
 
 // Module is a collection of subroutine definitions. It also contains the definitions of all blocks in the module so that
@@ -73,14 +105,23 @@ func (b BlockNode) Name() string {
 
 // ConstNode is a node that is a constant literal like 10 or "hello" that outputs a single value on a single port always
 type ConstNode struct {
-	Value parser.Expression
+	Value ast.Expression
 }
 
 func (c ConstNode) Name() string {
 	return c.Value.String()
 }
 
+type EdgeType int
+
+const (
+	// Edge types
+	IntEdge EdgeType = iota
+	StringEdge
+)
+
 type Edge struct {
+	Type             EdgeType
 	DstNode, SrcNode NodeIdx
 	DstPort, SrcPort PortIdx
 }
@@ -116,17 +157,55 @@ type value interface {
 }
 
 type grapher struct {
-	blockReference   *parser.Module
+	blockReference   *ast.Module
 	symbolTable      map[string]value
-	blockBeingParsed *parser.Block
+	blockBeingParsed *ast.Block
 }
 
-func grapherErr(expr parser.Expression, err error) error {
+func (g *grapher) lookupNodeDesc(node Node) (*ast.Block, error) {
+	switch v := node.(type) {
+	case BlockNode:
+		return g.blockReference.Blocks[v.Block], nil
+	case ConstNode:
+		switch v.Value.(type) {
+		case *ast.Integer:
+			return IntBlock, nil
+		case *ast.String:
+			return StringBlock, nil
+		default:
+			return nil, fmt.Errorf("unrecognized constant value type %s", v.Value)
+		}
+	default:
+		panic("unsupported node type")
+	}
+}
+
+func (g *grapher) AddEdge(def *Definition, srcNode, dstNode NodeIdx, srcPort, dstPort PortIdx) error {
+	srcBlock, err := g.lookupNodeDesc(def.getNode(srcNode))
+	if err != nil {
+		return err
+	}
+	srcPortDesc, err := srcBlock.Inputs[srcPort]
+	if err != nil {
+		return err
+	}
+
+	dstBlock, err := g.lookupNodeDesc(def.getNode(dstNode))
+	if err != nil {
+		return err
+	}
+	dstPortDesc, err := dstBlock.Outputs[dstPort]
+	if err != nil {
+		return err
+	}
+}
+
+func grapherErr(expr ast.Expression, err error) error {
 	start, _ := expr.Span()
 	return fmt.Errorf("syntax error: %d:%d (%v) %w", start.Line, start.Col, expr, err)
 }
 
-func TraceModule(input *parser.Module) (*Module, error) {
+func TraceModule(input *ast.Module) (*Module, error) {
 	module := Module{
 		Definitions: make(map[string]Definition, len(input.Blocks)),
 	}
@@ -154,7 +233,7 @@ func TraceModule(input *parser.Module) (*Module, error) {
 	return &module, nil
 }
 
-func (g *grapher) traceBlock(block *parser.Block) (Definition, error) {
+func (g *grapher) traceBlock(block *ast.Block) (Definition, error) {
 	def := Definition{}
 	for _, expr := range block.Body {
 		if _, err := g.traceExpression(expr, &def); err != nil {
@@ -167,25 +246,25 @@ func (g *grapher) traceBlock(block *parser.Block) (Definition, error) {
 // Convert an expression to a sequence of blocks (added to def) and return the returned outputs from
 // the expression (0 or more outputs)
 // For example, the expression a() could return 0 or more outputs
-func (g *grapher) traceExpression(expr parser.Expression, def *Definition) (value, error) {
+func (g *grapher) traceExpression(expr ast.Expression, def *Definition) (value, error) {
 	switch v := expr.(type) {
-	case *parser.AssignmentExpr:
+	case *ast.AssignmentExpr:
 		return g.traceAssignment(v, def)
-	case *parser.BlockCall:
+	case *ast.BlockCall:
 		return g.traceBlockCall(v, def)
-	case *parser.Identifier:
+	case *ast.Identifier:
 		return g.traceIdentifier(v, def)
-	case *parser.Integer, *parser.Float, *parser.String:
+	case *ast.Integer, *ast.Float, *ast.String:
 		return g.traceLiteral(v, def)
-	case *parser.Return:
+	case *ast.Return:
 		return g.traceReturn(v, def)
-	case *parser.Map:
+	case *ast.Map:
 		return g.traceMap(v, def)
 	}
 	return nil, nil
 }
 
-func (g *grapher) traceAssignment(assign *parser.AssignmentExpr, def *Definition) (value, error) {
+func (g *grapher) traceAssignment(assign *ast.AssignmentExpr, def *Definition) (value, error) {
 	// "Assignments" are more pattern matching than actual variables storing state. We destructure the right hand side
 	// according to the pattern on the left hand side. Unbinded symbol names are bound to the ports/outputs on the right hand side.
 	rhs, err := g.traceExpression(assign.Right, def)
@@ -195,19 +274,19 @@ func (g *grapher) traceAssignment(assign *parser.AssignmentExpr, def *Definition
 	return rhs, g.unifyExpr(assign.Left, rhs)
 }
 
-func (g *grapher) unifyExpr(pattern parser.Expression, rhs value) error {
+func (g *grapher) unifyExpr(pattern ast.Expression, rhs value) error {
 	switch p := pattern.(type) {
-	case *parser.Identifier:
+	case *ast.Identifier:
 		// 1. An identifier a = b()
 		return g.unifyValue(p, rhs)
-	case *parser.Map:
+	case *ast.Map:
 		// 2. A map a: b, c: d = v()
 		return g.unifyMap(p, rhs)
 	}
 	return grapherErr(pattern, fmt.Errorf("expected left-hand side to be map or variable names only"))
 }
 
-func (g *grapher) unifyValue(pattern *parser.Identifier, rhs value) error {
+func (g *grapher) unifyValue(pattern *ast.Identifier, rhs value) error {
 	varName := pattern.Token.Value
 	g.symbolTable[varName] = rhs
 
@@ -222,7 +301,7 @@ func (g *grapher) unifyValue(pattern *parser.Identifier, rhs value) error {
 	return nil
 }
 
-func (g *grapher) unifyMap(pattern *parser.Map, rhs value) error {
+func (g *grapher) unifyMap(pattern *ast.Map, rhs value) error {
 	if rMap, ok := rhs.(mapValue); ok {
 		for _, entry := range pattern.Entries {
 			lKey := entry.Key.Token.Value
@@ -238,7 +317,7 @@ func (g *grapher) unifyMap(pattern *parser.Map, rhs value) error {
 	return nil
 }
 
-func (g *grapher) traceMap(v *parser.Map, def *Definition) (value, error) {
+func (g *grapher) traceMap(v *ast.Map, def *Definition) (value, error) {
 	rv := mapValue{Values: make(map[string]value)}
 	for _, entry := range v.Entries {
 		name := entry.Key.Token.Value
@@ -251,7 +330,7 @@ func (g *grapher) traceMap(v *parser.Map, def *Definition) (value, error) {
 	return rv, nil
 }
 
-func (g *grapher) traceBlockCall(call *parser.BlockCall, def *Definition) (value, error) {
+func (g *grapher) traceBlockCall(call *ast.BlockCall, def *Definition) (value, error) {
 	blockName := call.Name.Token.Value
 	if block, ok := g.blockReference.Blocks[blockName]; ok {
 		args := make([]value, len(block.Inputs.Entries))
@@ -316,7 +395,7 @@ func (g *grapher) traceBlockCall(call *parser.BlockCall, def *Definition) (value
 	}
 }
 
-func (g *grapher) traceIdentifier(id *parser.Identifier, def *Definition) (value, error) {
+func (g *grapher) traceIdentifier(id *ast.Identifier, def *Definition) (value, error) {
 	variable := id.Token.Value
 	if src, ok := g.symbolTable[variable]; ok {
 		return src, nil
@@ -325,7 +404,7 @@ func (g *grapher) traceIdentifier(id *parser.Identifier, def *Definition) (value
 	}
 }
 
-func (g *grapher) traceLiteral(v parser.Expression, def *Definition) (value, error) {
+func (g *grapher) traceLiteral(v ast.Expression, def *Definition) (value, error) {
 	def.Nodes = append(def.Nodes, ConstNode{v})
 	thisNode := NodeIdx(len(def.Nodes) - 1)
 	return singleValue{
@@ -334,7 +413,7 @@ func (g *grapher) traceLiteral(v parser.Expression, def *Definition) (value, err
 	}, nil
 }
 
-func (g *grapher) traceReturn(v *parser.Return, def *Definition) (value, error) {
+func (g *grapher) traceReturn(v *ast.Return, def *Definition) (value, error) {
 	retVal, err := g.traceExpression(v.Value, def)
 	if err != nil {
 		return nil, err

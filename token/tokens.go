@@ -1,28 +1,18 @@
-package lexer
+package token
 
 import (
 	"bytes"
-	"encoding/json"
-	"fmt"
 )
 
-type TokenKind int
-
-type Token struct {
-	Kind      TokenKind
-	Value     string
-	Line, Col int
-}
-
-func (t Token) String() string {
-	return fmt.Sprintf("[%v %v %v:%v]", t.Kind, t.Value, t.Line, t.Col)
-}
+type Token int
 
 const (
-	Invalid TokenKind = iota
+	Invalid Token = iota
 
 	// Keywords
 	Return
+	IntType
+	StringType
 
 	// Literals
 	Ident
@@ -42,15 +32,19 @@ const (
 	LParen
 	RParen
 
-	Eof TokenKind = 999 // should always be at end
+	Eof Token = 999 // should always be at end
 )
 
-func (tk TokenKind) String() string {
+func (tk Token) String() string {
 	switch tk {
 	case Invalid:
 		return "Invalid"
 	case Return:
 		return "Return"
+	case IntType:
+		return "IntType"
+	case StringType:
+		return "StringType"
 	case Ident:
 		return "Ident"
 	case String:
@@ -80,18 +74,16 @@ func (tk TokenKind) String() string {
 	}
 }
 
-func (tk *TokenKind) UnmarshalJSON(b []byte) error {
-	var s string
-	err := json.Unmarshal(b, &s)
-	if err != nil {
-		return err
-	}
-
+func (tk *Token) FromString(s string) error {
 	switch s {
 	case "Invalid":
 		*tk = Invalid
 	case "Return":
 		*tk = Return
+	case "IntType":
+		*tk = IntType
+	case "StringType":
+		*tk = StringType
 	case "Ident":
 		*tk = Ident
 	case "String":
@@ -122,7 +114,7 @@ func (tk *TokenKind) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (tk TokenKind) MarshalJSON() ([]byte, error) {
+func (tk Token) MarshalJSON() ([]byte, error) {
 	buffer := bytes.NewBufferString(`"`)
 	buffer.WriteString(tk.String())
 	buffer.WriteString(`"`)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/masp/hoser/ast"
 	"github.com/masp/hoser/lexer"
 )
 
@@ -15,10 +16,10 @@ var (
 	// `main() {}` -> empty
 	// vs.
 	// `main()` -> nil
-	EmptyFnBody = []Expression{}
+	EmptyFnBody = []ast.Expression{}
 )
 
-func (s *parserState) parseFunction() (*Block, error) {
+func (s *parserState) parseBlock() (*ast.Block, error) {
 	ident, err := s.eatOnly(lexer.Ident)
 	if err == ErrUnexpectedEnd {
 		// It is fine if no more tokens in this case (no more functions)
@@ -44,7 +45,7 @@ func (s *parserState) parseFunction() (*Block, error) {
 		return nil, err
 	}
 
-	outputs := &Map{StartToken: next}
+	outputs := &ast.Map{StartToken: next}
 	if next.Kind == lexer.LParen {
 		// parse output definition
 		if outputs, err = s.parseArgs(); err != nil {
@@ -59,7 +60,7 @@ func (s *parserState) parseFunction() (*Block, error) {
 		return nil, err
 	}
 
-	return &Block{
+	return &ast.Block{
 		Name:    name,
 		Inputs:  inputs,
 		Outputs: outputs,
@@ -70,7 +71,7 @@ func (s *parserState) parseFunction() (*Block, error) {
 // parseArgs takes either the input or output arguments specification and converts it to a Map
 // example:
 // ([name: string, value: int]) -> Map{{Key: name, Val: string}, {Key: value, Val: int}}
-func (s *parserState) parseArgs() (*Map, error) {
+func (s *parserState) parseArgs() (*ast.Map, error) {
 	if _, err := s.eatOnly(lexer.LParen); err != nil {
 		return nil, err
 	}
@@ -91,26 +92,34 @@ func (s *parserState) parseArgs() (*Map, error) {
 		}
 
 		switch ent := inputs.(type) {
-		case *Map:
+		case *ast.Map:
 			return ent, nil
-		case *Entry:
+		case *ast.Entry:
 			key, _ := ent.Span()
-			return &Map{StartToken: key, Entries: []Entry{*ent}}, nil
+			return &ast.Map{StartToken: key, Entries: []ast.Entry{*ent}}, nil
 		default:
 			return nil, ErrInputOutputNotMap
 		}
 	} else {
 		s.eat()
 	}
-	return &Map{StartToken: next}, nil
+	return &ast.Map{StartToken: next}, nil
 }
 
-func (s *parserState) parseFnBody() ([]Expression, error) {
+func (s *parserState) parseFnBody() ([]ast.Expression, error) {
+	if next, err := s.peek(); next.Kind == lexer.Semicolon || err == ErrUnexpectedEnd {
+		// handle empty block declarations like:
+		// integer(v: int) (t: int)
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+
 	if _, err := s.eatOnly(lexer.LCurlyBrack); err != nil {
 		return nil, err
 	}
 
-	exprs := make([]Expression, 0)
+	exprs := make([]ast.Expression, 0)
 	for {
 		token, err := s.peek()
 		if err != nil {
@@ -138,14 +147,14 @@ func (s *parserState) parseFnBody() ([]Expression, error) {
 	return exprs, nil
 }
 
-func (s *parserState) parseBlockCall(left Expression, token lexer.Token) (*BlockCall, error) {
-	if name, ok := left.(*Identifier); ok {
+func (s *parserState) parseBlockCall(left ast.Expression, token lexer.Token) (*ast.BlockCall, error) {
+	if name, ok := left.(*ast.Identifier); ok {
 		next, err := s.peek()
 		if err != nil {
 			return nil, err
 		}
 
-		result := &BlockCall{Name: name, Args: &Map{StartToken: token}}
+		result := &ast.BlockCall{Name: name, Args: &ast.Map{StartToken: token}}
 		if next.Kind != lexer.RParen {
 			// Let's parse the args (non-empty), and we continue parsing until we match our end paren and reset precedence
 			args, err := s.parseExpression(lexer.Invalid)
@@ -154,11 +163,11 @@ func (s *parserState) parseBlockCall(left Expression, token lexer.Token) (*Block
 			}
 
 			switch ent := args.(type) {
-			case *Map:
+			case *ast.Map:
 				result.Args = ent
-			case *Entry:
+			case *ast.Entry:
 				key, _ := ent.Span()
-				result.Args = &Map{StartToken: key, Entries: []Entry{*ent}}
+				result.Args = &ast.Map{StartToken: key, Entries: []ast.Entry{*ent}}
 			default:
 				return nil, fmt.Errorf("invalid argument syntax to call a block %T, must be a Map", args)
 			}
@@ -171,13 +180,13 @@ func (s *parserState) parseBlockCall(left Expression, token lexer.Token) (*Block
 	return nil, ErrInvalidBlockName
 }
 
-func (s *parserState) parseReturn(token lexer.Token) (*Return, error) {
+func (s *parserState) parseReturn(token lexer.Token) (*ast.Return, error) {
 	val, err := s.parseExpression(lexer.Invalid)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Return{
+	return &ast.Return{
 		Token: token,
 		Value: val,
 	}, nil

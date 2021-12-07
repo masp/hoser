@@ -3,6 +3,7 @@ package parser
 import (
 	"errors"
 
+	"github.com/masp/hoser/ast"
 	"github.com/masp/hoser/lexer"
 )
 
@@ -13,14 +14,14 @@ var (
 	ErrExpectedEndOfMap  = errors.New("expected ] to end map")
 )
 
-func (s *parserState) parseEntry(left Expression, token lexer.Token) (*Entry, error) {
+func (s *parserState) parseEntry(left ast.Expression, token lexer.Token) (*ast.Entry, error) {
 	right, err := s.parseExpression(token.Kind)
 	if err != nil {
 		return nil, err
 	}
 
-	if left, ok := left.(*Identifier); ok {
-		return &Entry{Key: *left, Val: right}, nil
+	if left, ok := left.(*ast.Identifier); ok {
+		return &ast.Entry{Key: *left, Val: right}, nil
 	}
 	return nil, ErrInvalidEntryKey
 }
@@ -30,16 +31,16 @@ func (s *parserState) parseEntry(left Expression, token lexer.Token) (*Entry, er
 //
 // key: value -> Entry
 // key: value, key2: value2 -> EntryList
-func (s *parserState) parseEntries(left Expression, token lexer.Token) (*Map, error) {
-	if first, ok := left.(*Entry); ok {
-		entries := []Entry{*first}
+func (s *parserState) parseEntries(left ast.Expression, token lexer.Token) (*ast.Map, error) {
+	if first, ok := left.(*ast.Entry); ok {
+		entries := []ast.Entry{*first}
 		for {
 			next, err := s.parseExpression(lexer.Comma)
 			if err != nil {
 				return nil, err
 			}
 
-			if entry, ok := next.(*Entry); ok {
+			if entry, ok := next.(*ast.Entry); ok {
 				entries = append(entries, *entry)
 			} else {
 				return nil, ErrInvalidEntryValue
@@ -55,7 +56,7 @@ func (s *parserState) parseEntries(left Expression, token lexer.Token) (*Map, er
 			}
 		}
 		key, _ := first.Span()
-		return &Map{
+		return &ast.Map{
 			StartToken: key,
 			Entries:    entries,
 		}, nil

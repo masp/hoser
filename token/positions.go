@@ -1,0 +1,193 @@
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Source is modified from Go's excellent internal token package.
+// Ref: https://cs.opensource.google/go/go/+/refs/tags/go1.17.3:src/go/token/position.go
+
+package token
+
+import (
+	"fmt"
+	"sync"
+)
+
+// -----------------------------------------------------------------------------
+// Positions
+
+// Position describes an arbitrary source position
+// including the file, line, and column location.
+// A Position is valid if the line number is > 0.
+//
+type Position struct {
+	Filename string // filename, if any
+	Offset   Pos    // offset, starting at 0
+	Line     int    // line number, starting at 1
+	Column   int    // column number, starting at 1 (byte count)
+}
+
+// IsValid reports whether the position is valid.
+func (pos *Position) IsValid() bool { return pos.Line > 0 }
+
+// String returns a string in one of several forms:
+//
+//	file:line:column    valid position with file name
+//	file:line           valid position with file name but no column (column == 0)
+//	line:column         valid position without file name
+//	line                valid position without file name and no column (column == 0)
+//	file                invalid position with file name
+//	-                   invalid position without file name
+//
+func (pos Position) String() string {
+	s := pos.Filename
+	if pos.IsValid() {
+		if s != "" {
+			s += ":"
+		}
+		s += fmt.Sprintf("%d", pos.Line)
+		if pos.Column != 0 {
+			s += fmt.Sprintf(":%d", pos.Column)
+		}
+	}
+	if s == "" {
+		s = "-"
+	}
+	return s
+}
+
+// Pos is a compact encoding of a source position within a file set.
+// It can be converted into a Position for a more convenient, but much
+// larger, representation.
+//
+// Pos = offset in the File
+type Pos int
+
+// The zero value for Pos is NoPos; there is no file and line information
+// associated with it, and NoPos.IsValid() is false. NoPos is always
+// smaller than any other Pos value. The corresponding Position value
+// for NoPos is the zero value for Position.
+//
+const NoPos Pos = -1
+
+// IsValid reports whether the position is valid.
+func (p Pos) IsValid() bool {
+	return p != NoPos
+}
+
+// -----------------------------------------------------------------------------
+// File
+
+// A File is a handle for an opened file.
+// A File has a name, size, and line offset table.
+//
+type File struct {
+	name string // file name as provided to AddFile
+	size int    // file size as provided to AddFile
+
+	lineMut *sync.Mutex // guards lines for threadsafe access
+	lines   []int       // lines contains the offset of the first character for each line (the first entry is always 0)
+}
+
+func NewFile(name string, size int) File {
+	return File{
+		name:    name,
+		size:    size,
+		lineMut: &sync.Mutex{},
+		lines:   nil,
+	}
+}
+
+// Name returns the file name of file f as registered with AddFile.
+func (f *File) Name() string {
+	return f.name
+}
+
+// Size returns the size of file f as registered with AddFile.
+func (f *File) Size() int {
+	return f.size
+}
+
+// LineCount returns the number of lines in file f.
+func (f *File) LineCount() int {
+	f.lineMut.Lock()
+	n := len(f.lines)
+	f.lineMut.Unlock()
+	return n
+}
+
+// AddLine adds the line offset for a new line.
+// The line offset must be larger than the offset for the previous line
+// and smaller than the file size; otherwise the line offset is ignored.
+//
+func (f *File) AddLine(offset int) {
+	f.lineMut.Lock()
+	if i := len(f.lines); (i == 0 || f.lines[i-1] < offset) && offset < f.size {
+		f.lines = append(f.lines, offset)
+	}
+	f.lineMut.Unlock()
+}
+
+// Pos returns the Pos value for the given file offset;
+// the offset must be <= f.Size().
+// f.Pos(f.Offset(p)) == p.
+//
+func (f *File) Pos(offset int) Pos {
+	if offset > f.size {
+		panic(fmt.Sprintf("invalid file offset %d (should be <= %d)", offset, f.size))
+	}
+	return Pos(offset)
+}
+
+// Line returns the line number for the given file position p;
+// p must be a Pos value in that file or NoPos.
+//
+func (f *File) Line(p Pos) int {
+	return f.Position(p).Line
+}
+
+// PositionFor returns the Position value for the given file position p.
+// If adjusted is set, the position may be adjusted by position-altering
+// //line comments; otherwise those comments are ignored.
+// p must be a Pos value in f or NoPos.
+//
+func (f *File) Position(p Pos) (pos Position) {
+	pos = Position{Filename: f.Name(), Offset: p}
+	if p != NoPos {
+		offset := int(p)
+		if offset < 0 || offset > f.size {
+			panic(fmt.Sprintf("invalid Pos value %d (should be in [%d, %d])", p, 0, f.size))
+		}
+		f.lineMut.Lock()
+		if i := searchInts(f.lines, int(p)); i >= 0 {
+			pos.Line, pos.Column = i+1, offset-f.lines[i]+1
+		}
+		f.lineMut.Unlock()
+	}
+	return
+}
+
+// -----------------------------------------------------------------------------
+// Helper functions
+
+func searchInts(a []int, x int) int {
+	// This function body is a manually inlined version of:
+	//
+	//   return sort.Search(len(a), func(i int) bool { return a[i] > x }) - 1
+	//
+	// With better compiler optimizations, this may not be needed in the
+	// future, but at the moment this change improves the go/printer
+	// benchmark performance by ~30%. This has a direct impact on the
+	// speed of gofmt and thus seems worthwhile (2011-04-29).
+	// TODO(gri): Remove this when compilers have caught up.
+	i, j := 0, len(a)
+	for i < j {
+		h := int(uint(i+j) >> 1) // avoid overflow when computing h
+		// i ≤ h < j
+		if a[h] <= x {
+			i = h + 1
+		} else {
+			j = h
+		}
+	}
+	return i - 1
+}

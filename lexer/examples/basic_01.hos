@@ -1,7 +1,0 @@
-Stdin() (stdin: Stream)
-Stdout(out: Stream)
-
-main() {
-    stdin: in, v: fun = Stdin()
-    Stdout(out: in)
-}

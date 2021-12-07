@@ -1,8 +1,11 @@
 package lexer
 
 import "bytes"
+import "github.com/masp/hoser/token"
 
-func (s *lexerState) lex() (Token, error) {
+func (s *Scanner) lex() (pos token.Pos, tok token.Token, lit string, err error) {
+	pos = token.Pos(s.cursor)
+	lit = ""
 	for {
 		s.token = s.cursor
 /*!re2c
@@ -15,17 +18,18 @@ func (s *lexerState) lex() (Token, error) {
 		re2c:define:YYRESTORE = "s.cursor = s.marker";
 
 		end = [\x00];
-		end { return s.createToken(Eof), nil }
-		* { return Token{}, ErrBadToken }
+		end { tok = token.Eof; return }
+		* { err = ErrBadToken; return }
 
 		// Whitespace and new lines
-		("\r\n" | "\n") { 
-			if s.lexEol() == Semicolon {
+		("\r\n" | "\n") {
+			if s.lexEol() == token.Semicolon {
 				s.cursor = s.token // Has the effect of "inserting" the semicolon in the input
-				return s.createToken(Semicolon), nil
+				tok = token.Semicolon
+				lit = "\n"
+				return
 			} else {
-				s.line += 1
-				s.lineStart = s.cursor
+				s.file.AddLine(int(pos))
 				continue
 			}
 		}
@@ -34,28 +38,30 @@ func (s *lexerState) lex() (Token, error) {
 		}
 
 		// Keywords
-		"return" { return s.createToken(Return), nil }
+		"return" { tok = token.Return; lit = "return"; return }
+		"int"    { tok = token.IntType; lit = "int"; return }
+		"string" { tok = token.StringType; lit = "string"; return }
 
 		// Operators and punctuation
-		"(" { return s.createToken(LParen), nil }
-		")" { return s.createToken(RParen), nil }
-		"{" { return s.createToken(LCurlyBrack), nil }
-		"}" { return s.createToken(RCurlyBrack), nil }
-		"=" { return s.createToken(Equals), nil }
-		"," { return s.createToken(Comma), nil }
-		":" { return s.createToken(Colon), nil }
-		";" { return s.createToken(Semicolon), nil }
+		"(" { tok = token.LParen; lit = "("; return }
+		")" { tok = token.RParen; lit = ")"; return }
+		"{" { tok = token.LCurlyBrack; lit = "{"; return }
+		"}" { tok = token.RCurlyBrack; lit = "}"; return }
+		"=" { tok = token.Equals; lit = "="; return }
+		"," { tok = token.Comma; lit = ","; return }
+		":" { tok = token.Colon; lit = ":"; return }
+		";" { tok = token.Semicolon; lit = ";"; return }
 
 		// Integer literals
 		dec = [1-9][0-9]*;
-		dec { return s.createToken(Integer), nil }
+		dec { tok = token.Integer; lit = s.literal(); return }
 
 		// Floating point numbers
 		// from excellent https://re2c.org/examples/c/real_world/example_cxx98.html
 		frc = [0-9]* "." [0-9]+ | [0-9]+ ".";
 		exp = 'e' [+-]? [0-9]+;
 		flt = (frc exp? | [0-9]+ exp);
-		flt { return s.createToken(Float), nil }
+		flt { tok = token.Float; lit = s.literal(); return }
 
 		// Strings
 		["] { return s.lexString('"') } 
@@ -63,12 +69,12 @@ func (s *lexerState) lex() (Token, error) {
 
 		// Identifiers
 		id = [a-zA-Z_][a-zA-Z_0-9]*;
-		id { return s.createToken(Ident), nil }
+		id { tok = token.Ident; lit = s.literal(); return }
 */		
 	}
 }
 
-func (s *lexerState) lexString(quote byte) (Token, error) {
+func (s *Scanner) lexString(quote byte) (pos token.Pos, tok token.Token, lit string, err error) {
 	var buf bytes.Buffer
 	for {
 		var u byte
@@ -79,13 +85,14 @@ func (s *lexerState) lexString(quote byte) (Token, error) {
 		re2c:define:YYPEEK = "s.text[s.cursor]";
 		re2c:define:YYSKIP = "s.cursor += 1";
 
-		*                    { return Token{}, ErrInvalidString }
+		*                    { err = ErrInvalidString; return }
 		[^\n\\]              {
 			u = yych
 			if (u == quote) {
-				tok := s.createToken(String)
-				tok.Value = string(buf.Bytes())
-				return tok, nil
+				tok = token.String
+				pos = token.Pos(s.token)
+				lit = string(buf.Bytes())
+				return
 			}
 			buf.WriteByte(u)
 			continue
