@@ -4,111 +4,95 @@ import (
 	"fmt"
 
 	"github.com/masp/hoser/ast"
-	"github.com/masp/hoser/graph"
+	"github.com/masp/hoser/parser"
+	"github.com/masp/hoser/token"
 )
 
-// runtime is responsible for taking a read-only state and applying a dataflow computation to produce a new state.
+type NativeProc func(state *State)
 
-// Ports is a small struct that is a list of pointers to underlying flat arrays
-// For example, if a block has 2 input ports first int and second str type, then:
-// Ports{
-//  order: 'is'x
-// 	intPorts: {&port1}
-//  strPorts: {&port2}
-// }
-type Ports struct {
-	order    [8]byte
-	intPorts []*int
-	strPorts []*string
+type State struct {
+	NativeProcs map[string]NativeProc
+	Args        []interface{}
 }
 
-type machineFn func(m *Machine, in Ports, out Ports)
-
-type Machine struct {
-	blockTable   map[string]*ast.Block
-	nativeBlocks map[string]machineFn
-}
-
-func NewMachine() *Machine {
-	m := &Machine{
-		blockTable: make(map[string]*ast.Block),
-		nativeBlocks: map[string]machineFn{
-			"Print": printFn,
-		},
+func New() *State {
+	return &State{
+		NativeProcs: make(map[string]NativeProc),
 	}
-	return m
 }
 
-func (m *Machine) LoadModule(module *ast.Module) *Machine {
-	for _, block := range module.Blocks {
-		m.blockTable[block.Name.Token.Value] = block
+func (rt *State) Lookup(ident *ast.Ident) NativeProc {
+	return rt.NativeProcs[ident.FullName()]
+}
+
+func (rt *State) Register(module string, name string, proc NativeProc) {
+	rt.NativeProcs[module+"."+name] = proc
+}
+
+func (rt *State) Push(arg interface{}) {
+	rt.Args = append(rt.Args, arg)
+}
+
+func (rt *State) ClearArgs() {
+	rt.Args = rt.Args[0:]
+}
+
+func (rt *State) RunProgram(program []byte) error {
+	file := token.NewFile("", len(program))
+	module, err := parser.ParseModule(&file, program)
+	if err != nil {
+		return err
 	}
-	return m
+	return rt.Run(module)
 }
 
-func printFn(m *Machine, in Args, out Args) {
-	a := in.IntArg(0)
+func (rt *State) Run(module *ast.Module) error {
+	mainBlock := findMainBlock(module)
+	if mainBlock == nil {
+		return fmt.Errorf("missing 'main' pipe in module")
+	}
 
-}
+	for _, stmt := range mainBlock.Body {
+		switch st := stmt.(type) {
+		case *ast.ExprStmt:
+			switch x := st.X.(type) {
+			case *ast.CallExpr:
+				if proc := rt.Lookup(x.Name); proc != nil {
+					for _, arg := range x.Args {
+						argv, err := rt.evalExpr(arg)
+						if err != nil {
+							return err
+						}
+						rt.Push(argv)
+					}
+					proc(rt)
 
-func (m *Machine) DefineBlock(name string, fn machineFn) *Machine {
-	m.nativeBlocks[name] = fn
-	return m
-}
-
-// argBuffers is the underlying backing for where blocks store and retrieve their input and output args from.
-// There are two types of arrays:
-// - The ports array is equal to the number of ports in the whole graph, which holds all the references for each block
-// to the data array.
-// - The data array is what is written to and read from by the blocks when they are doing their computation.
-type argBuffers struct {
-	intDataBuf []int
-	intPortBuf []*int // points to intDataBuf
-
-	strDataBuf []string
-	strPortBuf []*string // points to strDataBuf
-}
-
-func (m *Machine) buildArgBuffers(program graph.Definition) (argBuffers, error) {
-	var (
-		numIntPorts, numStrPorts int = 0, 0
-	)
-
-	for i, node := range program.Nodes {
-		switch v := node.(type) {
-		case graph.BlockNode:
-			blockDef, ok := m.blockTable[v.Block]
-			if !ok {
-				return argBuffers{}, fmt.Errorf("block name '%s' not found", v.Block)
-			}
-			for _, entry := range blockDef.Inputs.Entries {
-				switch entry.Val.(type) {
-				case lexer.
+					// Clear args for next call
+					rt.ClearArgs()
+				} else {
+					return fmt.Errorf("no proc with name %v found", x.Name.FullName())
 				}
 			}
 		}
+	}
 
-		numIntPorts += node
+	return nil
+}
+
+func (rt *State) evalExpr(x ast.Expr) (interface{}, error) {
+	switch v := x.(type) {
+	case *ast.LiteralExpr:
+		return v.ParsedVal, nil
+	default:
+		return nil, fmt.Errorf("unsupported expression found in args %v", x.Pos())
 	}
 }
 
-func (m *Machine) Run(program graph.Definition) error {
-	var numIntPorts, numStrPorts int
-
-	intPortBuf := make([]int, 0)
-	intDataBuf := make([]int, 0)
-	strArgBuf := make([]string)
-	for _, edge := range graph.Edges {
-		edge.SrcNode
-	}
-
-	out := in.Copy()
-
-	for _, node := range graph.Nodes {
-		if block, ok := m.blocks[node.Block]; ok {
-			block(m, in, &out)
-		} else {
-			return in, fmt.Errorf("no block found with name ")
+func findMainBlock(module *ast.Module) *ast.BlockDecl {
+	for _, block := range module.Blocks {
+		if block.Name.Name == "main" {
+			return block
 		}
 	}
+	return nil
 }

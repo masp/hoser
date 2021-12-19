@@ -4,29 +4,36 @@ import (
 	"strconv"
 
 	"github.com/masp/hoser/ast"
-	"github.com/masp/hoser/lexer"
+	"github.com/masp/hoser/token"
 )
 
-func (s *parserState) parseIdentifier(token lexer.Token) (*ast.Identifier, error) {
-	return &ast.Identifier{Token: token}, nil
-}
-
-func (s *parserState) parseString(token lexer.Token) (*ast.String, error) {
-	return &ast.String{Token: token}, nil
-}
-
-func (s *parserState) parseInteger(token lexer.Token) (*ast.Integer, error) {
-	v, err := strconv.ParseInt(token.Value, 0, 64)
-	if err != nil {
-		return nil, err
+func (p *parser) parseIdentifier(first tokenInfo) *ast.Ident {
+	next := p.peek()
+	if next.tok == token.Period {
+		p.eat()
+		name := p.eatOnly(token.Ident)
+		return &ast.Ident{Name: name.lit, NamePos: name.pos, Module: first.lit, ModulePos: first.pos}
 	}
-	return &ast.Integer{Token: token, Value: v}, nil
+	return &ast.Ident{Name: first.lit, NamePos: first.pos}
 }
 
-func (s *parserState) parseFloat(token lexer.Token) (*ast.Float, error) {
-	v, err := strconv.ParseFloat(token.Value, 64)
-	if err != nil {
-		return nil, err
+func (p *parser) parseLiteral(tok tokenInfo) *ast.LiteralExpr {
+	var parsedVal interface{}
+	switch tok.tok {
+	case token.Integer:
+		v, err := strconv.ParseInt(tok.lit, 10, 64)
+		if err != nil {
+			p.error(tok.pos, err)
+		}
+		parsedVal = v
+	case token.Float:
+		v, err := strconv.ParseFloat(tok.lit, 64)
+		if err != nil {
+			p.error(tok.pos, err)
+		}
+		parsedVal = v
+	case token.String:
+		parsedVal = tok.lit
 	}
-	return &ast.Float{Token: token, Value: v}, nil
+	return &ast.LiteralExpr{Start: tok.pos, Type: tok.tok, Value: tok.lit, ParsedVal: parsedVal}
 }

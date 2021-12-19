@@ -2,10 +2,9 @@ package parser
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/masp/hoser/ast"
-	"github.com/masp/hoser/lexer"
+	"github.com/masp/hoser/token"
 )
 
 var (
@@ -16,178 +15,122 @@ var (
 	// `main() {}` -> empty
 	// vs.
 	// `main()` -> nil
-	EmptyFnBody = []ast.Expression{}
+	EmptyFnBody = []ast.Expr{}
 )
 
-func (s *parserState) parseBlock() (*ast.Block, error) {
-	ident, err := s.eatOnly(lexer.Ident)
-	if err == ErrUnexpectedEnd {
-		// It is fine if no more tokens in this case (no more functions)
-		return nil, nil
-	} else if err != nil {
-		return nil, err
+func (p *parser) parseBlock() *ast.BlockDecl {
+	ident := p.eat()
+	if ident.tok == token.Eof {
+		return nil // No more blocks, so we finish
+	} else if ident.tok != token.Ident {
+		p.eatOnly(token.Ident) // use error handling in eatOnly
+		return nil             // TODO: return badblock
 	}
+	name := p.parseIdentifier(ident)
 
-	name, err := s.parseIdentifier(ident)
-	if err != nil {
-		return nil, err
-	}
-
-	inputs, err := s.parseArgs()
-	if err != nil {
-		return nil, err
-	}
+	inputs := p.parseArgs()
 
 	// output is optional
 	// e.g. `main() () {}`` is equivalent to `main() {}`
-	next, err := s.peek()
-	if err != nil {
-		return nil, err
-	}
-
-	outputs := &ast.Map{StartToken: next}
-	if next.Kind == lexer.LParen {
+	next := p.peek()
+	var outputs *ast.FieldList
+	if next.tok == token.LParen {
 		// parse output definition
-		if outputs, err = s.parseArgs(); err != nil {
-			return nil, err
-		}
-	} else if next.Kind != lexer.LCurlyBrack {
-		return nil, ErrExpectedFnBody
+		outputs = p.parseArgs()
 	}
 
-	body, err := s.parseFnBody()
-	if err != nil {
-		return nil, err
+	var body []ast.Stmt
+	var lbrack, rbrack token.Pos
+	next = p.peek()
+	if next.tok == token.LCurlyBrack {
+		lbrack = p.eatOnly(token.LCurlyBrack).pos
+		body = p.parseFnBody()
+		rbrack = p.eatOnly(token.RCurlyBrack).pos
+	} else if next.tok != token.Eof && next.tok != token.Semicolon {
+		p.expectedError(next, "'{' or end of line")
 	}
 
-	return &ast.Block{
-		Name:    name,
-		Inputs:  inputs,
-		Outputs: outputs,
-		Body:    body,
-	}, nil
+	return &ast.BlockDecl{
+		Name:      name,
+		Inputs:    inputs,
+		Outputs:   outputs,
+		BegLBrack: lbrack,
+		Body:      body,
+		EndRBrack: rbrack,
+	}
 }
 
 // parseArgs takes either the input or output arguments specification and converts it to a Map
 // example:
 // ([name: string, value: int]) -> Map{{Key: name, Val: string}, {Key: value, Val: int}}
-func (s *parserState) parseArgs() (*ast.Map, error) {
-	if _, err := s.eatOnly(lexer.LParen); err != nil {
-		return nil, err
-	}
+func (p *parser) parseArgs() *ast.FieldList {
+	lparen := p.eatOnly(token.LParen).pos
+	var rparen token.Pos
 
-	next, err := s.peek()
-	if err != nil {
-		return nil, err
-	}
+	next := p.peek()
 
-	if next.Kind != lexer.RParen {
-		inputs, err := s.parseExpression(lexer.Invalid)
-		if err != nil {
-			return nil, err
-		}
+	var fields []*ast.Field
+	if next.tok != token.RParen {
+		args := p.parseExpression(token.Invalid)
 
-		if _, err := s.eatOnly(lexer.RParen); err != nil {
-			return nil, err
-		}
+		rparen = p.eatOnly(token.RParen).pos
 
-		switch ent := inputs.(type) {
-		case *ast.Map:
-			return ent, nil
-		case *ast.Entry:
-			key, _ := ent.Span()
-			return &ast.Map{StartToken: key, Entries: []ast.Entry{*ent}}, nil
+		switch ent := args.(type) {
+		case *ast.FieldList:
+			fields = ent.Fields
+		case *ast.Field:
+			fields = []*ast.Field{ent}
 		default:
-			return nil, ErrInputOutputNotMap
+			p.error(next.pos, ErrInputOutputNotMap)
 		}
 	} else {
-		s.eat()
+		rparen = p.eat().pos
 	}
-	return &ast.Map{StartToken: next}, nil
+	return &ast.FieldList{
+		Opener: lparen,
+		Fields: fields,
+		Closer: rparen,
+	}
 }
 
-func (s *parserState) parseFnBody() ([]ast.Expression, error) {
-	if next, err := s.peek(); next.Kind == lexer.Semicolon || err == ErrUnexpectedEnd {
-		// handle empty block declarations like:
-		// integer(v: int) (t: int)
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-
-	if _, err := s.eatOnly(lexer.LCurlyBrack); err != nil {
-		return nil, err
-	}
-
-	exprs := make([]ast.Expression, 0)
+func (p *parser) parseFnBody() []ast.Stmt {
+	var exprs []ast.Stmt
 	for {
-		token, err := s.peek()
-		if err != nil {
-			return nil, err
-		}
+		exprTok := p.peek()
 
-		if token.Kind == lexer.RCurlyBrack {
-			// no more expressions in body
-			break
+		if exprTok.tok == token.RCurlyBrack {
+			break // no more expressions in body
 		}
-
-		expr, err := s.parseExpression(lexer.Invalid)
-		if err != nil {
-			return nil, err
-		}
-		exprs = append(exprs, expr)
+		exprs = append(exprs, p.parseStmt())
 
 		// expressions always end in either ; or }. If there's one or more ;, we should eat them.
-		s.eatAll(lexer.Semicolon)
+		p.eatAll(token.Semicolon)
 	}
-
-	if _, err := s.eatOnly(lexer.RCurlyBrack); err != nil {
-		return nil, err
-	}
-	return exprs, nil
+	return exprs
 }
 
-func (s *parserState) parseBlockCall(left ast.Expression, token lexer.Token) (*ast.BlockCall, error) {
-	if name, ok := left.(*ast.Identifier); ok {
-		next, err := s.peek()
-		if err != nil {
-			return nil, err
-		}
+func (p *parser) parseBlockCall(left ast.Expr, lparen tokenInfo) *ast.CallExpr {
+	if name, ok := left.(*ast.Ident); ok {
+		next := p.peek()
 
-		result := &ast.BlockCall{Name: name, Args: &ast.Map{StartToken: token}}
-		if next.Kind != lexer.RParen {
+		result := &ast.CallExpr{Name: name, Lparen: lparen.pos}
+		for next.tok != token.RParen {
 			// Let's parse the args (non-empty), and we continue parsing until we match our end paren and reset precedence
-			args, err := s.parseExpression(lexer.Invalid)
-			if err != nil {
-				return nil, err
-			}
-
-			switch ent := args.(type) {
-			case *ast.Map:
-				result.Args = ent
-			case *ast.Entry:
-				key, _ := ent.Span()
-				result.Args = &ast.Map{StartToken: key, Entries: []ast.Entry{*ent}}
-			default:
-				return nil, fmt.Errorf("invalid argument syntax to call a block %T, must be a Map", args)
+			arg := p.parseExpression(token.Invalid)
+			result.Args = append(result.Args, arg)
+			next = p.peek()
+			if next.tok == token.Comma {
+				p.eatOnly(token.Comma)
+			} else if next.tok != token.RParen {
+				p.expectedError(next, "comma or right paren ')'")
+				return result
 			}
 		}
-		if _, err := s.eatOnly(lexer.RParen); err != nil {
-			return nil, err
-		}
-		return result, nil
-	}
-	return nil, ErrInvalidBlockName
-}
+		result.Rparen = p.eatOnly(token.RParen).pos
 
-func (s *parserState) parseReturn(token lexer.Token) (*ast.Return, error) {
-	val, err := s.parseExpression(lexer.Invalid)
-	if err != nil {
-		return nil, err
+		return result
+	} else {
+		p.expectedError(left.Pos(), "block name")
 	}
-
-	return &ast.Return{
-		Token: token,
-		Value: val,
-	}, nil
+	return nil
 }

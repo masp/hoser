@@ -1,32 +1,24 @@
 package parser
 
 import (
-	"fmt"
-
 	"github.com/masp/hoser/ast"
-	"github.com/masp/hoser/lexer"
+	"github.com/masp/hoser/token"
 )
 
-func (s *parserState) parseModule() (*ast.Module, error) {
+func (p *parser) parseModule() *ast.Module {
+	p.eatOnly(token.Module)
+	name := p.parseIdentifier(p.eat())
+
 	module := &ast.Module{
-		Blocks: make(map[string]*ast.Block),
+		Name: name,
 	}
-
 	for {
-		err := s.eatAll(lexer.Semicolon)
-		if err != nil {
-			// no more functions
-			return module, nil
-		}
-		fn, err := s.parseBlock()
-		if err != nil {
-			return nil, fmt.Errorf("%v:%v: syntax error at %v: %w", s.nextToken.Line, s.nextToken.Col, s.nextToken.Value, err)
-		}
+		p.eatAll(token.Semicolon)
+		block := p.parseBlock()
 
-		if fn == nil {
-			// no more functions
-			return module, nil
+		if block == nil {
+			return module // no more blocks
 		}
-		module.Blocks[fn.Name.Token.Value] = fn
+		module.Blocks = append(module.Blocks, block)
 	}
 }

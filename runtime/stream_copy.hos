@@ -1,0 +1,22 @@
+module main
+
+
+
+# Receive a stream of file names on stdin. For each file name, copy that file from one folder to another.
+
+pipe main(stdin: lines) (stdout: lines) {
+    srcs, dsts = stream.Split(lines, ",")
+    cp(src, dst)
+}
+
+proc cp(src: string, dst: string)
+
+# Receive a stream of src,dst names on stdin.
+# For each file name, start a 
+
+pipe main(stdin: stream) (stdout: stream) {
+    srcs, dsts = stream.Split(stdin, ",")
+    cp(src, dst)
+}
+
+proc cp(src: string, dst: string)

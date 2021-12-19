@@ -6,12 +6,23 @@ import (
 
 	"github.com/masp/hoser/ast"
 	"github.com/masp/hoser/lexer"
+	"github.com/masp/hoser/token"
 )
 
-type parserState struct {
-	tokens    <-chan lexer.Token
-	errCh     <-chan error
-	nextToken lexer.Token
+type parser struct {
+	file    *token.File
+	scanner *lexer.Scanner
+	errors  token.ErrorList
+
+	// if peek() is called, peeked will be the cached values so that
+	// calls to eat() will consume this rather than calling next() again.
+	peeked tokenInfo
+}
+
+type tokenInfo struct {
+	pos token.Pos
+	tok token.Token
+	lit string
 }
 
 var (
@@ -19,97 +30,131 @@ var (
 	ErrExpectedExpression = errors.New("expected expression")
 )
 
-func ParseModule(fileSrc string) (*ast.Module, error) {
-	tokens, errCh := lexer.Scan(fileSrc)
-	s := parserState{
-		tokens: tokens,
-		errCh:  errCh,
-	}
-	return s.parseModule()
+func ParseModule(file *token.File, src []byte) (module *ast.Module, err error) {
+	scanner := lexer.NewScanner(file, src)
+	p := parser{file: file, scanner: scanner}
+	defer p.handleErrors(&err)
+	module = p.parseModule()
+	return
 }
 
-func ParseBlock(src string) (*ast.Block, error) {
-	tokens, errCh := lexer.Scan(src)
-	s := parserState{
-		tokens: tokens,
-		errCh:  errCh,
-	}
-	return s.parseBlock()
+func ParseBlock(file *token.File, src []byte) (block *ast.BlockDecl, err error) {
+	scanner := lexer.NewScanner(file, src)
+	p := parser{file: file, scanner: scanner}
+	defer p.handleErrors(&err)
+	block = p.parseBlock()
+	return
 }
 
-func (s *parserState) fetchToken() (lexer.Token, error) {
-	select {
-	case token := <-s.tokens:
-		return token, nil
-	case err := <-s.errCh:
-		if err == nil {
-			// The lexer will send nil on the errChan once input is finished
-			return lexer.Token{}, ErrUnexpectedEnd
+func ParseExpression(file *token.File, src []byte) (expr ast.Expr, err error) {
+	scanner := lexer.NewScanner(file, src)
+	p := parser{file: file, scanner: scanner}
+	defer p.handleErrors(&err)
+	expr = p.parseExpression(token.Invalid)
+	return
+}
+
+// recover bailout panics where we have gotten too many errors
+func (p *parser) handleErrors(err *error) {
+	if e := recover(); e != nil {
+		// resume same panic if it's not a bailout
+		if _, ok := e.(bailout); !ok {
+			panic(e)
 		}
-		return lexer.Token{}, err
 	}
+	p.errors.Sort()
+	*err = p.errors.Err()
 }
 
-func (s *parserState) peek() (lexer.Token, error) {
-	if s.nextToken.Kind != lexer.Invalid {
-		return s.nextToken, nil
+// A bailout panic is raised to indicate early termination.
+type bailout struct{}
+
+func (p *parser) error(pos token.Pos, err error) {
+	epos := p.file.Position(pos)
+
+	// If AllErrors is not set, discard errors reported on the same line
+	// as the last recorded error and stop parsing if there are more than
+	// 10 errors.
+	n := len(p.errors)
+	if n > 0 && p.errors[n-1].Pos.Line == epos.Line {
+		return // discard - likely a spurious error
+	}
+	if n > 10 {
+		panic(bailout{})
 	}
 
-	next, err := s.fetchToken()
-	if err != nil {
-		return lexer.Token{}, err
-	}
-	s.nextToken = next // cache it so when we eat we eat the cached and not from the token stream
-	return next, nil
+	p.errors.Add(epos, err)
 }
 
-func (s *parserState) eat() (lexer.Token, error) {
-	next, err := s.peek()
-	if err != nil {
-		return lexer.Token{}, err
+func (p *parser) expectedError(posOrTok interface{}, msg string) {
+	msg = "expected " + msg
+	var pos token.Pos
+	if got, ok := posOrTok.(tokenInfo); ok {
+		// the error happened at the current position;
+		// make the error message more specific
+		pos = got.pos
+		switch {
+		case got.tok == token.Semicolon && got.lit == "\n":
+			msg += ", found newline"
+		case got.tok.IsLiteral():
+			// print 123 rather than 'INT', etc.
+			msg += ", found " + got.lit
+		default:
+			msg += ", found '" + got.tok.String() + "'"
+		}
+	} else if pos, ok = posOrTok.(token.Pos); !ok {
+		panic("invalid arg, expected token.Pos or tokenInfo")
 	}
-	s.nextToken = lexer.Token{}
-	return next, nil
+	p.error(pos, fmt.Errorf(msg))
 }
 
-func (s *parserState) eatOnly(tk lexer.TokenKind) (lexer.Token, error) {
-	token, err := s.eat()
-	if err != nil {
-		return lexer.Token{}, err
-	}
-	if token.Kind != tk {
-		return lexer.Token{}, fmt.Errorf("expected token %v, got %v", tk, token)
-	}
-	return token, nil
+func (p *parser) next() {
+	p.peeked.pos, p.peeked.tok, p.peeked.lit = p.scanner.Next()
 }
 
-func (s *parserState) eatAll(tk lexer.TokenKind) error {
+func (p *parser) peek() tokenInfo {
+	if p.peeked.tok == token.Invalid {
+		p.next()
+	}
+	return p.peeked
+}
+
+func (p *parser) eat() tokenInfo {
+	tok := p.peek()
+	p.peeked = tokenInfo{} // token is consumed immediately
+	return tok
+}
+
+func (p *parser) eatOnly(expected token.Token) tokenInfo {
+	next := p.peek()
+	if next.tok == expected {
+		return p.eat()
+	}
+	p.error(next.pos, fmt.Errorf("expected token %v, got %v", expected, next.tok))
+	return next
+}
+
+func (p *parser) eatAll(expected token.Token) {
 	for {
-		next, err := s.peek()
-		if err != nil {
-			return err
+		next := p.peek()
+		if next.tok != expected {
+			break
 		}
-
-		if next.Kind != tk {
-			return nil
-		}
-		s.eat()
+		p.eat()
 	}
 }
 
-func precedence(kind lexer.TokenKind) int {
+func precedence(kind token.Token) int {
 	switch kind {
-	case lexer.Semicolon:
+	case token.Semicolon:
 		return -1 // End of expression always
-	case lexer.Invalid:
+	case token.Invalid:
 		return 0 // lexer.Invalid is a special token meaning no parent
-	case lexer.Equals:
+	case token.Equals:
 		return 1
-	case lexer.Comma:
-		return 3
-	case lexer.Colon:
+	case token.Colon:
 		return 4
-	case lexer.LParen:
+	case token.LParen:
 		return 5
 	default:
 		// Every other token is lower precedence than these and signal an end to an expression
@@ -117,71 +162,51 @@ func precedence(kind lexer.TokenKind) int {
 	}
 }
 
-func (s *parserState) parseExpression(parent lexer.TokenKind) (ast.Expression, error) {
-	left, err := s.parsePrefix()
-	if err != nil {
-		return nil, err
-	}
+func (p *parser) parseStmt() ast.Stmt {
+	return &ast.ExprStmt{X: p.parseExpression(token.Invalid)}
+}
 
+func (p *parser) parseExpression(parent token.Token) ast.Expr {
+	left := p.parsePrefix()
 	for {
-		next, err := s.peek()
-		if err != nil {
-			return nil, err
+		next := p.peek()
+		if precedence(parent) >= precedence(next.tok) {
+			return left
 		}
 
-		if precedence(parent) >= precedence(next.Kind) {
-			return left, nil
-		}
-
-		left, err = s.parseInfixExpr(left)
-		if err != nil {
-			return nil, err
-		}
+		left = p.parseInfixExpr(left)
 	}
 }
 
-func (s *parserState) parsePrefix() (ast.Expression, error) {
-	token, err := s.eat()
-	if err != nil {
-		return nil, err
-	}
+func (p *parser) parsePrefix() ast.Expr {
+	next := p.eat()
 
-	switch token.Kind {
-	case lexer.LParen:
-		return s.parseLParen(token)
-	case lexer.Ident:
-		return s.parseIdentifier(token)
-	case lexer.String:
-		return s.parseString(token)
-	case lexer.Integer:
-		return s.parseInteger(token)
-	case lexer.Float:
-		return s.parseFloat(token)
-	case lexer.Return:
-		return s.parseReturn(token)
-	case lexer.IntType, lexer.StringType:
-		return &ast.Type{Token: token}, nil
+	switch next.tok {
+	case token.LParen:
+		return p.parseLParen(next)
+	case token.Ident:
+		return p.parseIdentifier(next)
+	case token.String, token.Integer, token.Float:
+		return p.parseLiteral(next)
+	case token.LCurlyBrack:
+		return p.parseFieldList(next)
 	default:
-		return nil, fmt.Errorf("expected expression got %v", token.Kind)
+		p.error(next.pos, fmt.Errorf("expected expression got %v", next.tok))
+		return nil
 	}
 }
 
-func (s *parserState) parseInfixExpr(left ast.Expression) (ast.Expression, error) {
-	token, err := s.eat()
-	if err != nil {
-		return nil, err
-	}
-
-	switch token.Kind {
-	case lexer.Equals:
-		return s.parseEquals(left, token)
-	case lexer.Colon:
-		return s.parseEntry(left, token)
-	case lexer.Comma:
-		return s.parseEntries(left, token)
-	case lexer.LParen:
-		return s.parseBlockCall(left, token)
+func (p *parser) parseInfixExpr(left ast.Expr) ast.Expr {
+	next := p.eat()
+	switch next.tok {
+	case token.Equals:
+		return p.parseEquals(left, next)
+	case token.Colon:
+		return p.parseField(left, next)
+	case token.LParen:
+		return p.parseBlockCall(left, next)
 	default:
-		return nil, ErrExpectedExpression
+		p.error(next.pos, fmt.Errorf("invalid token for infix expression: %v", next.tok))
+		return nil
 	}
 }

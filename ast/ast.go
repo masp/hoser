@@ -1,10 +1,7 @@
 package ast
 
 import (
-	"fmt"
-	"strings"
-
-	"github.com/masp/hoser/lexer"
+	"github.com/masp/hoser/token"
 )
 
 // A hoser module is a set of function definitions. Functions can be either:
@@ -13,268 +10,236 @@ import (
 // - Sinks (only inputs, no outputs)
 // - Mixed (inputs, outputs)
 //
-// A function is defined by a name, a set of inputs, and a set of outputs.
+// A block is defined by a name, a set of inputs, and a set of outputs.
 //
 // An input and output are defined by a name and an optional type (default any).
 //
-// A function is composed of 1 or more expressions. An expression can be either:
+// A block is composed of 1 or more expressions. An expression can be either:
 // - An assignment statement e.g. `a = 5`
-// - Function call e.g. `a(value: 10)`
+// - Another block call e.g. `a(value: 10)`
 //
 
 type Node interface {
-	Span() (lexer.Token, lexer.Token) // the first and last token that this node spans
-	String() string
+	Pos() token.Pos // the offset where this node starts
+	End() token.Pos // the offset where this node ends
 }
 
-type Module struct {
-	Blocks map[string]*Block
-}
-
-func (m *Module) String() string {
-	var sb strings.Builder
-	for _, fn := range m.Blocks {
-		sb.WriteString(fn.String())
-		sb.WriteString("; ")
-	}
-	return sb.String()
-}
-
-type Block struct {
-	Name    *Identifier
-	Inputs  []Port
-	Outputs []Port
-	Body    []Expression
-}
-
-func (f *Block) Span() (lexer.Token, lexer.Token) {
-	return f.Name.Span()
-}
-
-func (f *Block) String() string {
-	var sb strings.Builder
-	sb.WriteString(f.Name.Token.Value)
-
-	sb.WriteString("(")
-	if f.Inputs != nil {
-		for _, port := range f.Inputs {
-			sb.WriteString(port.Name)
-			sb.WriteString(": ")
-			sb.WriteString(port.Type.Token.Value)
-			sb.WriteString(", ")
-		}
-	}
-	sb.WriteString(")")
-
-	if f.Outputs != nil {
-		sb.WriteString(" (")
-		for _, port := range f.Inputs {
-			sb.WriteString(port.Name)
-			sb.WriteString(": ")
-			sb.WriteString(port.Type.Token.Value)
-			sb.WriteString(", ")
-		}
-		sb.WriteString(")")
-	}
-
-	if f.Body != nil {
-		sb.WriteString(" {")
-		for _, expr := range f.Body {
-			sb.WriteString("\n")
-			sb.WriteString(expr.String())
-		}
-		sb.WriteString("}")
-	}
-
-	return sb.String()
-}
-
-type Port struct {
-	Name string
-	Type Type
-}
-
-type Expression interface {
+// Decl is only a Block declaration, e.g. `block()`
+type Decl interface {
 	Node
+	declNode()
 }
 
-// An entry are two expressions separated by a colon
-type Entry struct {
-	Key Identifier
-	Val Expression
+type Stmt interface {
+	Node
+	stmtNode()
 }
 
-func (e *Entry) Span() (lexer.Token, lexer.Token) {
-	left, _ := e.Key.Span()
-	_, right := e.Val.Span()
-	return left, right
+type Expr interface {
+	Node
+	exprNode()
 }
 
-func (e *Entry) String() string {
-	return fmt.Sprintf("%v: %v", e.Key.String(), e.Val.String())
+// ----------------------------------------------------------------------------
+// Declarations
+//
+
+// Module represents all the contents of a single file, including all defined blocks and all referenced blocks.
+type Module struct {
+	ModulePos token.Pos // position of module keyword
+	Name      *Ident    // name of module identifier
+	Blocks    []*BlockDecl
 }
 
-type Map struct {
-	StartToken lexer.Token
-	Entries    []Entry
+func (m *Module) Pos() token.Pos {
+	return m.ModulePos
 }
 
-func (m *Map) Span() (lexer.Token, lexer.Token) {
-	end := m.StartToken
-	if len(m.Entries) > 0 {
-		_, end = m.Entries[len(m.Entries)-1].Span()
+func (m *Module) End() token.Pos {
+	if len(m.Blocks) > 0 {
+		return m.Blocks[len(m.Blocks)-1].End()
+	} else {
+		return m.Name.End()
 	}
-	return m.StartToken, end
 }
 
-func (m *Map) String() string {
-	var sb strings.Builder
-	for i := 0; i < len(m.Entries); i++ {
-		sb.WriteString(m.Entries[i].String())
-		if i < len(m.Entries)-1 {
-			sb.WriteString(", ")
+type BlockDecl struct {
+	Name      *Ident
+	Inputs    *FieldList
+	Outputs   *FieldList
+	BegLBrack token.Pos
+	Body      []Stmt
+	EndRBrack token.Pos
+}
+
+func (b *BlockDecl) Pos() token.Pos {
+	return b.Name.Pos()
+}
+
+func (b *BlockDecl) End() token.Pos {
+	if b.IsStub() {
+		return b.Outputs.End()
+	} else {
+		return b.EndRBrack
+	}
+}
+
+func (b *BlockDecl) IsStub() bool {
+	return b.BegLBrack.IsValid()
+}
+
+func (m *Module) declNode()    {}
+func (m *BlockDecl) declNode() {}
+
+// ----------------------------------------------------------------------------
+// Expressions
+//
+
+// Field is a key-value combination like 'key: value' that shows up in block definitions and pattern
+// matching.
+type Field struct {
+	Key   Expr
+	Colon token.Pos
+	Value Expr
+}
+
+func (f *Field) Pos() token.Pos {
+	return f.Key.Pos()
+}
+
+func (f *Field) End() token.Pos {
+	return f.Value.End()
+}
+
+type FieldList struct {
+	Opener token.Pos // Opening { or NoPos if none
+	Fields []*Field
+	Closer token.Pos // Closing } or NoPos if none
+}
+
+func (f *FieldList) Pos() token.Pos {
+	if f.Opener.IsValid() {
+		return f.Opener
+	} else {
+		if f.Len() > 0 {
+			return f.Fields[0].Pos()
+		} else {
+			panic("impossible to have empty fields without surrounding {/(")
 		}
 	}
-	return sb.String()
 }
 
-type Identifier struct {
-	Token lexer.Token
-}
-
-func (i *Identifier) Span() (lexer.Token, lexer.Token) {
-	return i.Token, i.Token
-}
-
-func (i *Identifier) String() string {
-	return i.Token.Value
-}
-
-type BlockCall struct {
-	Name *Identifier
-	Args *Map
-}
-
-func (e *BlockCall) Span() (lexer.Token, lexer.Token) {
-	return e.Name.Span()
-}
-
-func (e *BlockCall) String() string {
-	return fmt.Sprintf("%v(%v)", e.Name.String(), e.Args.String())
-}
-
-// AssignmentExpr is an expression separated by an =
-type AssignmentExpr struct {
-	Left  Expression
-	Right Expression
-}
-
-func (e *AssignmentExpr) Span() (lexer.Token, lexer.Token) {
-	left, _ := e.Left.Span()
-	_, right := e.Right.Span()
-	return left, right
-}
-
-func (e *AssignmentExpr) String() string {
-	return fmt.Sprintf("%v = %v", e.Left.String(), e.Right.String())
-}
-
-type String struct {
-	Token lexer.Token
-}
-
-func (s *String) Value() string {
-	return s.Token.Value
-}
-
-func (s *String) Span() (lexer.Token, lexer.Token) {
-	return s.Token, s.Token
-}
-
-func (s *String) String() string {
-	return fmt.Sprintf("\"%s\"", s.Token.Value)
-}
-
-type Integer struct {
-	Token lexer.Token
-	Value int64
-}
-
-func (i *Integer) Span() (lexer.Token, lexer.Token) {
-	return i.Token, i.Token
-}
-
-func (i *Integer) String() string {
-	return fmt.Sprintf("%d", i.Value)
-}
-
-type Float struct {
-	Token lexer.Token
-	Value float64
-}
-
-func (f *Float) Span() (lexer.Token, lexer.Token) {
-	return f.Token, f.Token
-}
-
-func (f *Float) String() string {
-	return fmt.Sprintf("%f", f.Value)
-}
-
-type Return struct {
-	Token lexer.Token
-	Value Expression
-}
-
-func (r *Return) Span() (lexer.Token, lexer.Token) {
-	_, end := r.Value.Span()
-	return r.Token, end
-}
-
-func (r *Return) String() string {
-	return fmt.Sprintf("return %s", r.Value.String())
-}
-
-type Type struct {
-	Token lexer.Token
-}
-
-func (t *Type) Span() (lexer.Token, lexer.Token) {
-	return t.Token, t.Token
-}
-
-func (t *Type) String() string {
-	return fmt.Sprintf("return %s", t.Token.Value)
-}
-
-func PrintTokenAst(node Node, indent int) string {
-	var sb strings.Builder
-	sb.WriteString(strings.Repeat("\t", indent))
-	beg, end := node.Span()
-	sb.WriteString(beg.String())
-	sb.WriteString(" - ")
-	sb.WriteString(end.String())
-	sb.WriteString("\n")
-	indent += 1
-	switch v := node.(type) {
-	case *AssignmentExpr:
-		sb.WriteString(PrintTokenAst(v.Left, indent))
-		sb.WriteString(PrintTokenAst(v.Right, indent))
-	case *Map:
-		for _, entry := range v.Entries {
-			sb.WriteString(PrintTokenAst(&entry, indent))
+func (f *FieldList) End() token.Pos {
+	if f.Closer.IsValid() {
+		return f.Opener
+	} else {
+		if f.Len() > 0 {
+			return f.Fields[len(f.Fields)-1].Pos()
+		} else {
+			panic("impossible to have empty fields without surrounding }/)")
 		}
-	case *Entry:
-		sb.WriteString(PrintTokenAst(&v.Key, indent))
-		sb.WriteString(PrintTokenAst(v.Val, indent))
-	case *Block:
-		sb.WriteString(PrintTokenAst(v.Inputs, indent))
-		sb.WriteString(PrintTokenAst(v.Outputs, indent))
-		for _, e := range v.Body {
-			sb.WriteString(PrintTokenAst(e, indent))
-		}
-	case *BlockCall:
-		sb.WriteString(PrintTokenAst(v.Args, indent))
 	}
-	return sb.String()
 }
+
+func (f *FieldList) Len() int {
+	return len(f.Fields)
+}
+
+type CallExpr struct {
+	Name   *Ident
+	Lparen token.Pos
+	Args   []Expr
+	Rparen token.Pos
+}
+
+func (c *CallExpr) Pos() token.Pos {
+	return c.Name.Pos()
+}
+
+func (c *CallExpr) End() token.Pos {
+	return c.Rparen
+}
+
+type ParenExpr struct {
+	X Expr
+}
+
+func (p *ParenExpr) Pos() token.Pos {
+	return p.X.Pos() - token.Pos(1)
+}
+
+func (p *ParenExpr) End() token.Pos {
+	return p.X.Pos() + token.Pos(1)
+}
+
+type Ident struct {
+	Name      string // Name is the string value of the ident (= Run in mod.Run())
+	NamePos   token.Pos
+	Module    string // Module is mod in mod.Run(), if unscoped Module="" and ModulePos=NoPos
+	ModulePos token.Pos
+}
+
+func (i *Ident) Pos() token.Pos {
+	return i.NamePos
+}
+
+func (i *Ident) End() token.Pos {
+	return i.NamePos + token.Pos(len(i.Name))
+}
+
+func (i *Ident) FullName() string {
+	if i.ModulePos != token.NoPos {
+		return i.Module + "." + i.Name
+	}
+	return i.Name
+}
+
+type LiteralExpr struct {
+	Start     token.Pos
+	Type      token.Token // e.g. token.String, Integer or Float
+	Value     string
+	ParsedVal interface{}
+}
+
+func (lit *LiteralExpr) Pos() token.Pos {
+	return lit.Start
+}
+
+func (lit *LiteralExpr) End() token.Pos {
+	if lit.Type == token.String {
+		return lit.Start + token.Pos(len(lit.Value)+2) // +2 for ""
+	} else {
+		return lit.Start + token.Pos(len(lit.Value))
+	}
+}
+
+// AssignExpr is an expression separated by an =
+type AssignExpr struct {
+	Lhs   Expr
+	EqPos token.Pos
+	Rhs   Expr
+}
+
+func (a *AssignExpr) Pos() token.Pos { return a.Lhs.Pos() }
+func (a *AssignExpr) End() token.Pos { return a.Rhs.Pos() }
+
+func (*Field) exprNode()       {}
+func (*FieldList) exprNode()   {}
+func (*Ident) exprNode()       {}
+func (*CallExpr) exprNode()    {}
+func (*LiteralExpr) exprNode() {}
+func (*ParenExpr) exprNode()   {}
+func (*AssignExpr) exprNode()  {}
+
+// ----------------------------------------------------------------------------
+// Statements
+//
+
+type ExprStmt struct {
+	X Expr
+}
+
+func (e *ExprStmt) Pos() token.Pos { return e.X.Pos() }
+func (e *ExprStmt) End() token.Pos { return e.X.End() }
+
+func (e *ExprStmt) stmtNode() {}

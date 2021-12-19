@@ -2,25 +2,16 @@ package parser
 
 import (
 	"github.com/masp/hoser/ast"
-	"github.com/masp/hoser/lexer"
+	"github.com/masp/hoser/token"
 )
 
-func (s *parserState) parseEquals(left ast.Expression, token lexer.Token) (ast.Expression, error) {
-	right, err := s.parseExpression(token.Kind)
-	if err != nil {
-		return nil, err
-	}
-	return &ast.AssignmentExpr{Left: left, Right: right}, nil
+func (p *parser) parseEquals(left ast.Expr, eq tokenInfo) *ast.AssignExpr {
+	right := p.parseExpression(eq.tok)
+	return &ast.AssignExpr{Lhs: left, EqPos: eq.pos, Rhs: right}
 }
 
-func (s *parserState) parseLParen(token lexer.Token) (ast.Expression, error) {
-	expr, err := s.parseExpression(lexer.Invalid)
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := s.eatOnly(lexer.RParen); err != nil {
-		return nil, err
-	}
-	return expr, nil
+func (p *parser) parseLParen(lparen tokenInfo) *ast.ParenExpr {
+	expr := p.parseExpression(token.Invalid)
+	p.eatOnly(token.RParen)
+	return &ast.ParenExpr{X: expr}
 }

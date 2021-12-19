@@ -4,9 +4,9 @@ import "bytes"
 import "github.com/masp/hoser/token"
 
 func (s *Scanner) lex() (pos token.Pos, tok token.Token, lit string, err error) {
-	pos = token.Pos(s.cursor)
-	lit = ""
 	for {
+		lit = ""
+		pos = s.pos()
 		s.token = s.cursor
 /*!re2c
 		re2c:yyfill:enable = 0;
@@ -22,14 +22,15 @@ func (s *Scanner) lex() (pos token.Pos, tok token.Token, lit string, err error) 
 		* { err = ErrBadToken; return }
 
 		// Whitespace and new lines
-		("\r\n" | "\n") {
-			if s.lexEol() == token.Semicolon {
+		eol = ("\r\n" | "\n" | end);
+		eol {
+			if s.insertSemi() {
 				s.cursor = s.token // Has the effect of "inserting" the semicolon in the input
 				tok = token.Semicolon
 				lit = "\n"
 				return
 			} else {
-				s.file.AddLine(int(pos))
+				s.file.AddLine(s.token)
 				continue
 			}
 		}
@@ -37,10 +38,12 @@ func (s *Scanner) lex() (pos token.Pos, tok token.Token, lit string, err error) 
 			continue
 		}
 
+		// Comments
+		"#" [^\r\n\x00]* { tok = token.Comment; lit = s.literal(); return }
+
 		// Keywords
 		"return" { tok = token.Return; lit = "return"; return }
-		"int"    { tok = token.IntType; lit = "int"; return }
-		"string" { tok = token.StringType; lit = "string"; return }
+		"module" { tok = token.Module; lit = "module"; return }
 
 		// Operators and punctuation
 		"(" { tok = token.LParen; lit = "("; return }
@@ -48,6 +51,7 @@ func (s *Scanner) lex() (pos token.Pos, tok token.Token, lit string, err error) 
 		"{" { tok = token.LCurlyBrack; lit = "{"; return }
 		"}" { tok = token.RCurlyBrack; lit = "}"; return }
 		"=" { tok = token.Equals; lit = "="; return }
+		"." { tok = token.Period; lit = "."; return }
 		"," { tok = token.Comma; lit = ","; return }
 		":" { tok = token.Colon; lit = ":"; return }
 		";" { tok = token.Semicolon; lit = ";"; return }

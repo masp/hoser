@@ -5,6 +5,7 @@ import (
 
 	"github.com/masp/hoser/ast"
 	"github.com/masp/hoser/parser"
+	"github.com/masp/hoser/token"
 )
 
 // graph is a semantic representation of the parsed hoser syntax as a DAG that is more suitable for
@@ -42,18 +43,21 @@ type PortIdx int
 type NodeIdx int
 
 var (
-	IntBlock, StringBlock *ast.Block
+	IntBlock, StringBlock *ast.BlockDecl
 )
 
-func init() {
+func createGoBlock(src string) *ast.BlockDecl {
 	var err error
-	if IntBlock, err = parser.ParseBlock("Int() (v: int)"); err != nil {
-		panic(err)
+	file := token.NewFile("", len(src))
+	if b, err := parser.ParseBlock(&file, []byte(src)); err == nil {
+		return b
 	}
+	panic(err)
+}
 
-	if StringBlock, err = parser.ParseBlock("String() (v: string)"); err != nil {
-		panic(err)
-	}
+func init() {
+	IntBlock = createGoBlock("int() (v: int)")
+	StringBlock = createGoBlock("string() (v: string)")
 }
 
 // RootNode is the node index referring to the root block or the owner block
@@ -72,9 +76,9 @@ const RootNode NodeIdx = -1
 // The downside is that the program graph is difficult to modify in place (all indices change if anything is added or removed). Since most programs are
 // smaller, though, it is not too expensive to recalculate the whole graph each time.
 type Definition struct {
-	RootBlock string // RootBlock is the name of the block this definition represents
-	Nodes     []Node // the sequence of blocks. the indices of each node is used to lookup
-	Edges     []Edge // edges connecting two nodes
+	RootBlock *ast.BlockDecl // RootBlock is the name of the block this definition represents
+	Nodes     []Node         // the sequence of blocks. the indices of each node is used to lookup
+	Edges     []Edge         // edges connecting two nodes
 }
 
 func (def *Definition) getNode(idx NodeIdx) Node {
@@ -96,20 +100,20 @@ type Node interface {
 
 // BlockNode is a node that is a block
 type BlockNode struct {
-	Block string // block name that is executed by this node, can be used to look up definition.
+	Block *ast.BlockDecl // block name that is executed by this node, can be used to look up definition.
 }
 
 func (b BlockNode) Name() string {
-	return b.Block
+	return b.Block.Name.Name
 }
 
 // ConstNode is a node that is a constant literal like 10 or "hello" that outputs a single value on a single port always
 type ConstNode struct {
-	Value ast.Expression
+	X ast.LiteralExpr
 }
 
 func (c ConstNode) Name() string {
-	return c.Value.String()
+	return c.X.Value
 }
 
 type EdgeType int
@@ -159,13 +163,13 @@ type value interface {
 type grapher struct {
 	blockReference   *ast.Module
 	symbolTable      map[string]value
-	blockBeingParsed *ast.Block
+	blockBeingParsed *ast.BlockDecl
 }
 
-func (g *grapher) lookupNodeDesc(node Node) (*ast.Block, error) {
+func (g *grapher) lookupNodeDesc(node Node) (*ast.BlockDecl, error) {
 	switch v := node.(type) {
 	case BlockNode:
-		return g.blockReference.Blocks[v.Block], nil
+		return v.Block, nil
 	case ConstNode:
 		switch v.Value.(type) {
 		case *ast.Integer:
@@ -200,7 +204,7 @@ func (g *grapher) AddEdge(def *Definition, srcNode, dstNode NodeIdx, srcPort, ds
 	}
 }
 
-func grapherErr(expr ast.Expression, err error) error {
+func grapherErr(expr ast.Expr, err error) error {
 	start, _ := expr.Span()
 	return fmt.Errorf("syntax error: %d:%d (%v) %w", start.Line, start.Col, expr, err)
 }
@@ -246,17 +250,17 @@ func (g *grapher) traceBlock(block *ast.Block) (Definition, error) {
 // Convert an expression to a sequence of blocks (added to def) and return the returned outputs from
 // the expression (0 or more outputs)
 // For example, the expression a() could return 0 or more outputs
-func (g *grapher) traceExpression(expr ast.Expression, def *Definition) (value, error) {
+func (g *grapher) traceExpression(expr ast.Expr, def *Definition) (value, error) {
 	switch v := expr.(type) {
-	case *ast.AssignmentExpr:
+	case *ast.AssignExpr:
 		return g.traceAssignment(v, def)
 	case *ast.BlockCall:
 		return g.traceBlockCall(v, def)
-	case *ast.Identifier:
+	case *ast.Ident:
 		return g.traceIdentifier(v, def)
 	case *ast.Integer, *ast.Float, *ast.String:
 		return g.traceLiteral(v, def)
-	case *ast.Return:
+	case *ast.ReturnStmt:
 		return g.traceReturn(v, def)
 	case *ast.Map:
 		return g.traceMap(v, def)
@@ -264,7 +268,7 @@ func (g *grapher) traceExpression(expr ast.Expression, def *Definition) (value, 
 	return nil, nil
 }
 
-func (g *grapher) traceAssignment(assign *ast.AssignmentExpr, def *Definition) (value, error) {
+func (g *grapher) traceAssignment(assign *ast.AssignExpr, def *Definition) (value, error) {
 	// "Assignments" are more pattern matching than actual variables storing state. We destructure the right hand side
 	// according to the pattern on the left hand side. Unbinded symbol names are bound to the ports/outputs on the right hand side.
 	rhs, err := g.traceExpression(assign.Right, def)
@@ -274,9 +278,9 @@ func (g *grapher) traceAssignment(assign *ast.AssignmentExpr, def *Definition) (
 	return rhs, g.unifyExpr(assign.Left, rhs)
 }
 
-func (g *grapher) unifyExpr(pattern ast.Expression, rhs value) error {
+func (g *grapher) unifyExpr(pattern ast.Expr, rhs value) error {
 	switch p := pattern.(type) {
-	case *ast.Identifier:
+	case *ast.Ident:
 		// 1. An identifier a = b()
 		return g.unifyValue(p, rhs)
 	case *ast.Map:
@@ -286,7 +290,7 @@ func (g *grapher) unifyExpr(pattern ast.Expression, rhs value) error {
 	return grapherErr(pattern, fmt.Errorf("expected left-hand side to be map or variable names only"))
 }
 
-func (g *grapher) unifyValue(pattern *ast.Identifier, rhs value) error {
+func (g *grapher) unifyValue(pattern *ast.Ident, rhs value) error {
 	varName := pattern.Token.Value
 	g.symbolTable[varName] = rhs
 
@@ -395,7 +399,7 @@ func (g *grapher) traceBlockCall(call *ast.BlockCall, def *Definition) (value, e
 	}
 }
 
-func (g *grapher) traceIdentifier(id *ast.Identifier, def *Definition) (value, error) {
+func (g *grapher) traceIdentifier(id *ast.Ident, def *Definition) (value, error) {
 	variable := id.Token.Value
 	if src, ok := g.symbolTable[variable]; ok {
 		return src, nil
@@ -404,7 +408,7 @@ func (g *grapher) traceIdentifier(id *ast.Identifier, def *Definition) (value, e
 	}
 }
 
-func (g *grapher) traceLiteral(v ast.Expression, def *Definition) (value, error) {
+func (g *grapher) traceLiteral(v ast.Expr, def *Definition) (value, error) {
 	def.Nodes = append(def.Nodes, ConstNode{v})
 	thisNode := NodeIdx(len(def.Nodes) - 1)
 	return singleValue{
@@ -413,7 +417,7 @@ func (g *grapher) traceLiteral(v ast.Expression, def *Definition) (value, error)
 	}, nil
 }
 
-func (g *grapher) traceReturn(v *ast.Return, def *Definition) (value, error) {
+func (g *grapher) traceReturn(v *ast.ReturnStmt, def *Definition) (value, error) {
 	retVal, err := g.traceExpression(v.Value, def)
 	if err != nil {
 		return nil, err

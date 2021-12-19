@@ -9,6 +9,7 @@ package token
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -67,7 +68,7 @@ type Pos int
 // smaller than any other Pos value. The corresponding Position value
 // for NoPos is the zero value for Position.
 //
-const NoPos Pos = -1
+const NoPos Pos = 0
 
 // IsValid reports whether the position is valid.
 func (p Pos) IsValid() bool {
@@ -89,12 +90,14 @@ type File struct {
 }
 
 func NewFile(name string, size int) File {
-	return File{
+	f := File{
 		name:    name,
 		size:    size,
 		lineMut: &sync.Mutex{},
 		lines:   nil,
 	}
+	f.AddLine(-1) // implicit newline at the start of a file
+	return f
 }
 
 // Name returns the file name of file f as registered with AddFile.
@@ -122,7 +125,7 @@ func (f *File) LineCount() int {
 func (f *File) AddLine(offset int) {
 	f.lineMut.Lock()
 	if i := len(f.lines); (i == 0 || f.lines[i-1] < offset) && offset < f.size {
-		f.lines = append(f.lines, offset)
+		f.lines = append(f.lines, offset+1) // +1 since we want to put it at the start of the new line
 	}
 	f.lineMut.Unlock()
 }
@@ -135,7 +138,7 @@ func (f *File) Pos(offset int) Pos {
 	if offset > f.size {
 		panic(fmt.Sprintf("invalid file offset %d (should be <= %d)", offset, f.size))
 	}
-	return Pos(offset)
+	return Pos(offset + 1)
 }
 
 // Line returns the line number for the given file position p;
@@ -154,40 +157,14 @@ func (f *File) Position(p Pos) (pos Position) {
 	pos = Position{Filename: f.Name(), Offset: p}
 	if p != NoPos {
 		offset := int(p)
-		if offset < 0 || offset > f.size {
-			panic(fmt.Sprintf("invalid Pos value %d (should be in [%d, %d])", p, 0, f.size))
+		if offset <= 0 || offset > f.size {
+			panic(fmt.Sprintf("invalid Pos value %d (should be in [%d, %d])", p, 1, f.size))
 		}
 		f.lineMut.Lock()
-		if i := searchInts(f.lines, int(p)); i >= 0 {
-			pos.Line, pos.Column = i+1, offset-f.lines[i]+1
+		if i := sort.SearchInts(f.lines, offset) - 1; i >= 0 {
+			pos.Line, pos.Column = i+1, offset-f.lines[i]
 		}
 		f.lineMut.Unlock()
 	}
 	return
-}
-
-// -----------------------------------------------------------------------------
-// Helper functions
-
-func searchInts(a []int, x int) int {
-	// This function body is a manually inlined version of:
-	//
-	//   return sort.Search(len(a), func(i int) bool { return a[i] > x }) - 1
-	//
-	// With better compiler optimizations, this may not be needed in the
-	// future, but at the moment this change improves the go/printer
-	// benchmark performance by ~30%. This has a direct impact on the
-	// speed of gofmt and thus seems worthwhile (2011-04-29).
-	// TODO(gri): Remove this when compilers have caught up.
-	i, j := 0, len(a)
-	for i < j {
-		h := int(uint(i+j) >> 1) // avoid overflow when computing h
-		// i ≤ h < j
-		if a[h] <= x {
-			i = h + 1
-		} else {
-			j = h
-		}
-	}
-	return i - 1
 }

@@ -28,6 +28,10 @@ func ScanAll(file *token.File, text []byte) (ret []token.Token, err error) {
 			err = scanner.Errors[0]
 			return
 		}
+
+		if tok == token.Eof {
+			return
+		}
 		ret = append(ret, tok)
 	}
 }
@@ -38,7 +42,7 @@ type Scanner struct {
 	cursor, token int         // text[token:cursor] = currently parsed token
 	marker        int         // for re2c YYBACKUP and YYRESTORE
 	prevToken     token.Token // prevToken tracks the previously given Token (Invalid if none)
-	Errors        ErrorList
+	Errors        token.ErrorList
 }
 
 func NewScanner(file *token.File, text []byte) *Scanner {
@@ -60,22 +64,27 @@ func (s *Scanner) Next() (pos token.Pos, tok token.Token, lit string) {
 		s.Errors.Add(s.file.Position(pos), err)
 		return s.Next()
 	}
+
+	if tok != token.Comment {
+		// ignore comments for the sake of semicolon insertion
+		s.prevToken = tok
+	}
 	return pos, tok, lit
 }
 
 // eol is called when a newline token is read (\n or \r\n). It is responsible for resetting the
 // line information and injecting semicolons when appropriate.
-func (s *Scanner) lexEol() token.Token {
+func (s *Scanner) insertSemi() bool {
 	// insert semicolon if the previous token seems like it should have a semicolon after it.
 	// follows these rules: https://golang.org/doc/effective_go#semicolons
 	switch s.prevToken {
 	case token.Ident, token.RParen, token.RCurlyBrack:
-		return token.Semicolon
+		return true
 	default:
-		return token.Invalid
+		return false
 	}
 }
 
 func (s *Scanner) literal() string          { return string(s.text[s.token:s.cursor]) }
-func (s *Scanner) pos() token.Pos           { return token.Pos(s.cursor) }
+func (s *Scanner) pos() token.Pos           { return s.file.Pos(s.cursor) }
 func (s *Scanner) position() token.Position { return s.file.Position(s.pos()) }
