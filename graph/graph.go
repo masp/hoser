@@ -43,10 +43,10 @@ type PortIdx int
 type NodeIdx int
 
 var (
-	IntBlock, StringBlock *ast.BlockDecl
+	IntBlock, StringBlock *ast.PipeDecl
 )
 
-func createGoBlock(src string) *ast.BlockDecl {
+func createGoBlock(src string) *ast.PipeDecl {
 	var err error
 	file := token.NewFile("", len(src))
 	if b, err := parser.ParseBlock(&file, []byte(src)); err == nil {
@@ -60,25 +60,9 @@ func init() {
 	StringBlock = createGoBlock("string() (v: string)")
 }
 
-// RootNode is the node index referring to the root block or the owner block
-// Example:
-// main() {
-//   a()
-// }
-// in this main() is the root block that has zero outputs and zero inputs but contains the a() block.
-const RootNode NodeIdx = -1
-
-// Definition is a DAG representation of a block's body where each node represents a "block" to be executed with an ordered set of input and output ports. These ports
-// are labeled 0-N. Each node contains information about all its inputs and outputs, which are referenced by their indices. A graph component
-// is created for each block defined in the module.
-//
-// Only numeric indices are used rather than names to keep the representation concise and avoid circular references which can create complexity.
-// The downside is that the program graph is difficult to modify in place (all indices change if anything is added or removed). Since most programs are
-// smaller, though, it is not too expensive to recalculate the whole graph each time.
 type Definition struct {
-	RootBlock *ast.BlockDecl // RootBlock is the name of the block this definition represents
-	Nodes     []Node         // the sequence of blocks. the indices of each node is used to lookup
-	Edges     []Edge         // edges connecting two nodes
+	RootBlock *ast.PipeDecl // RootBlock is the name of the block this definition represents
+
 }
 
 func (def *Definition) getNode(idx NodeIdx) Node {
@@ -92,42 +76,6 @@ func (def *Definition) getNode(idx NodeIdx) Node {
 // information (like types of inputs, names of ports) can be referenced.
 type Module struct {
 	Definitions map[string]Definition // a definition for every block defined in a module by block name
-}
-
-type Node interface {
-	Name() string
-}
-
-// BlockNode is a node that is a block
-type BlockNode struct {
-	Block *ast.BlockDecl // block name that is executed by this node, can be used to look up definition.
-}
-
-func (b BlockNode) Name() string {
-	return b.Block.Name.Name
-}
-
-// ConstNode is a node that is a constant literal like 10 or "hello" that outputs a single value on a single port always
-type ConstNode struct {
-	X ast.LiteralExpr
-}
-
-func (c ConstNode) Name() string {
-	return c.X.Value
-}
-
-type EdgeType int
-
-const (
-	// Edge types
-	IntEdge EdgeType = iota
-	StringEdge
-)
-
-type Edge struct {
-	Type             EdgeType
-	DstNode, SrcNode NodeIdx
-	DstPort, SrcPort PortIdx
 }
 
 // value represents possible outputs from expressions in hoser.
@@ -163,10 +111,10 @@ type value interface {
 type grapher struct {
 	blockReference   *ast.Module
 	symbolTable      map[string]value
-	blockBeingParsed *ast.BlockDecl
+	blockBeingParsed *ast.PipeDecl
 }
 
-func (g *grapher) lookupNodeDesc(node Node) (*ast.BlockDecl, error) {
+func (g *grapher) lookupNodeDesc(node Node) (*ast.PipeDecl, error) {
 	switch v := node.(type) {
 	case BlockNode:
 		return v.Block, nil
@@ -211,10 +159,10 @@ func grapherErr(expr ast.Expr, err error) error {
 
 func TraceModule(input *ast.Module) (*Module, error) {
 	module := Module{
-		Definitions: make(map[string]Definition, len(input.Blocks)),
+		Definitions: make(map[string]Definition, len(input.DefinedPipes)),
 	}
 
-	for i, block := range input.Blocks {
+	for i, block := range input.DefinedPipes {
 		grapher := grapher{
 			blockReference:   input,
 			symbolTable:      make(map[string]value),
@@ -336,7 +284,7 @@ func (g *grapher) traceMap(v *ast.Map, def *Definition) (value, error) {
 
 func (g *grapher) traceBlockCall(call *ast.BlockCall, def *Definition) (value, error) {
 	blockName := call.Name.Token.Value
-	if block, ok := g.blockReference.Blocks[blockName]; ok {
+	if block, ok := g.blockReference.DefinedPipes[blockName]; ok {
 		args := make([]value, len(block.Inputs.Entries))
 		for _, arg := range call.Args.Entries {
 			inputName := arg.Key.Token.Value

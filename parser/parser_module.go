@@ -19,6 +19,6 @@ func (p *parser) parseModule() *ast.Module {
 		if block == nil {
 			return module // no more blocks
 		}
-		module.Blocks = append(module.Blocks, block)
+		module.DefinedPipes = append(module.DefinedPipes, block)
 	}
 }

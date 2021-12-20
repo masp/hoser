@@ -59,33 +59,3 @@ func (p *parser) parseField(left ast.Expr, colon tokenInfo) *ast.Field {
 	}
 	return nil
 }
-
-// parseFields is called when the first , is encountered in a map. parseEntry is called for the
-// first entry and then for every entry after that.
-//
-// key: value -> Entry
-// key: value, key2: value2 -> EntryList
-func (p *parser) parseFields(left ast.Expr, firstComma tokenInfo) *ast.FieldList {
-	if first, ok := left.(*ast.Field); ok {
-		entries := []*ast.Field{first}
-		for {
-			next := p.parseExpression(token.Comma)
-
-			if entry, ok := next.(*ast.Field); ok {
-				entries = append(entries, entry)
-			} else {
-				p.expectedError(entry.Pos(), "'key: value' field")
-			}
-
-			comma := p.peek()
-			if comma.tok != token.Comma {
-				break
-			}
-		}
-
-		return &ast.FieldList{Fields: entries}
-	} else {
-		p.expectedError(left.Pos(), "'key: value' pair")
-	}
-	return nil
-}

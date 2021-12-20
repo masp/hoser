@@ -38,7 +38,7 @@ func ParseModule(file *token.File, src []byte) (module *ast.Module, err error) {
 	return
 }
 
-func ParseBlock(file *token.File, src []byte) (block *ast.BlockDecl, err error) {
+func ParseBlock(file *token.File, src []byte) (block *ast.PipeDecl, err error) {
 	scanner := lexer.NewScanner(file, src)
 	p := parser{file: file, scanner: scanner}
 	defer p.handleErrors(&err)

@@ -29,7 +29,7 @@ func TestParseModule(t *testing.T) {
 				t.Errorf("ParseModule() ModuleName = %v, want %v", got.Name.Name, tt.wantModule)
 			}
 
-			for i, block := range got.Blocks {
+			for i, block := range got.DefinedPipes {
 				want := tt.wantBlocks[i]
 				if want != block.Name.Name {
 					t.Errorf("ParseModule() Block (%d) = %v, want %v", i, block.Name.Name, want)

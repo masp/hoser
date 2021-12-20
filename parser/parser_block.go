@@ -18,7 +18,7 @@ var (
 	EmptyFnBody = []ast.Expr{}
 )
 
-func (p *parser) parseBlock() *ast.BlockDecl {
+func (p *parser) parseBlock() *ast.PipeDecl {
 	ident := p.eat()
 	if ident.tok == token.Eof {
 		return nil // No more blocks, so we finish
@@ -50,7 +50,7 @@ func (p *parser) parseBlock() *ast.BlockDecl {
 		p.expectedError(next, "'{' or end of line")
 	}
 
-	return &ast.BlockDecl{
+	return &ast.PipeDecl{
 		Name:      name,
 		Inputs:    inputs,
 		Outputs:   outputs,

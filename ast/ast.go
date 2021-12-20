@@ -14,7 +14,7 @@ import (
 //
 // An input and output are defined by a name and an optional type (default any).
 //
-// A block is composed of 1 or more expressions. An expression can be either:
+// A pipe block is composed of 1 or more expressions. An expression can be either:
 // - An assignment statement e.g. `a = 5`
 // - Another block call e.g. `a(value: 10)`
 //
@@ -24,7 +24,7 @@ type Node interface {
 	End() token.Pos // the offset where this node ends
 }
 
-// Decl is only a Block declaration, e.g. `block()`
+// Decl is only a pipe block declaration, e.g. `block()`
 type Decl interface {
 	Node
 	declNode()
@@ -46,9 +46,9 @@ type Expr interface {
 
 // Module represents all the contents of a single file, including all defined blocks and all referenced blocks.
 type Module struct {
-	ModulePos token.Pos // position of module keyword
-	Name      *Ident    // name of module identifier
-	Blocks    []*BlockDecl
+	ModulePos    token.Pos // position of module keyword
+	Name         *Ident    // name of module identifier
+	DefinedPipes []*PipeDecl
 }
 
 func (m *Module) Pos() token.Pos {
@@ -56,27 +56,29 @@ func (m *Module) Pos() token.Pos {
 }
 
 func (m *Module) End() token.Pos {
-	if len(m.Blocks) > 0 {
-		return m.Blocks[len(m.Blocks)-1].End()
+	if len(m.DefinedPipes) > 0 {
+		return m.DefinedPipes[len(m.DefinedPipes)-1].End()
 	} else {
 		return m.Name.End()
 	}
 }
 
-type BlockDecl struct {
+type PipeDecl struct {
 	Name      *Ident
 	Inputs    *FieldList
 	Outputs   *FieldList
 	BegLBrack token.Pos
 	Body      []Stmt
 	EndRBrack token.Pos
+
+	BodyDAG *Graph // nil by default, added in by tracer
 }
 
-func (b *BlockDecl) Pos() token.Pos {
+func (b *PipeDecl) Pos() token.Pos {
 	return b.Name.Pos()
 }
 
-func (b *BlockDecl) End() token.Pos {
+func (b *PipeDecl) End() token.Pos {
 	if b.IsStub() {
 		return b.Outputs.End()
 	} else {
@@ -84,18 +86,18 @@ func (b *BlockDecl) End() token.Pos {
 	}
 }
 
-func (b *BlockDecl) IsStub() bool {
+func (b *PipeDecl) IsStub() bool {
 	return b.BegLBrack.IsValid()
 }
 
-func (m *Module) declNode()    {}
-func (m *BlockDecl) declNode() {}
+func (m *Module) declNode()   {}
+func (m *PipeDecl) declNode() {}
 
 // ----------------------------------------------------------------------------
 // Expressions
 //
 
-// Field is a key-value combination like 'key: value' that shows up in block definitions and pattern
+// Field is a key-value combination like 'key: value' that shows up in pipe definitions and pattern
 // matching.
 type Field struct {
 	Key   Expr

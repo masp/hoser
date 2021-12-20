@@ -18,7 +18,7 @@ type State struct {
 func New() *State {
 	return &State{
 		NativeProcs: make(map[string]NativeProc),
-		Pipes:       make(map[string]ast.BlockDecl),
+		Pipes:       make(map[string]ast.PipeDecl),
 	}
 }
 
@@ -36,7 +36,7 @@ func (rt *State) RegisterProc(module string, name string, proc NativeProc) {
 	}
 }
 
-func (rt *State) RegisterPipe(module string, name string, decl *ast.BlockDecl) {
+func (rt *State) RegisterPipe(module string, name string, decl *ast.PipeDecl) {
 	if module != "" {
 		rt.Pipes[module+"."+name] = decl
 	} else {
@@ -63,7 +63,7 @@ func (rt *State) RunProgram(program []byte) error {
 		return err
 	}
 
-	for _, block := range module.Blocks {
+	for _, block := range module.DefinedPipes {
 		rt.RegisterPipe("", block.Name.Name, block)
 	}
 
@@ -118,8 +118,8 @@ func (rt *State) evalArg(x ast.Expr) error {
 	}
 }
 
-func findMainBlock(module *ast.Module) *ast.BlockDecl {
-	for _, block := range module.Blocks {
+func findMainBlock(module *ast.Module) *ast.PipeDecl {
+	for _, block := range module.DefinedPipes {
 		if block.Name.Name == "main" {
 			return block
 		}
