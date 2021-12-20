@@ -13,6 +13,6 @@ package parser
 //
 // tracer also needs to verify that edges between ports are never incorrectly typed or that ports are missing connections or unused.
 //
-// The end product is a fully connected DAG with the only terminal blocks being stubs (defined in Go) and literal blocks.
-type resolver struct {
+// The end product is a fully connected set of DAGs with the only terminal blocks being stubs (defined in Go) and literal blocks.
+type tracer struct {
 }
