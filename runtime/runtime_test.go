@@ -13,9 +13,15 @@ func TestState_Run(t *testing.T) {
 		program string
 		want    []interface{}
 	}{
-		{"never called", "module main; main() {}", nil},
-		{"zero args", "module main; main() { test.Pass() }", []interface{}{}},
-		{"two args", `module main; main() { test.Pass(10, "hello") }`, []interface{}{10, "hello"}},
+		{"never called", "module main; main() {}", []interface{}{NotCalled}},
+		{"zero args", "module main; main() { test.Pass() }", nil},
+		{"two args", `module main; main() { test.Pass(10, "hello") }`, []interface{}{int64(10), "hello"}},
+		{"named args", `module main; main() { test.Pass(a: 10, b: "hello") }`, []interface{}{int64(10), "hello"}},
+		{"subcall", `
+module main
+sub(v: int) { test.Pass(v) }
+main() { sub(10) }
+`, []interface{}{int64(10)}},
 	}
 
 	for _, tt := range tests {
@@ -32,7 +38,7 @@ func TestState_Run(t *testing.T) {
 				return
 			}
 
-			if reflect.DeepEqual(got, tt.want) {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Run() called Pass() with %v, want %v", got, tt.want)
 			}
 		})

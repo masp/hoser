@@ -18,20 +18,39 @@ type State struct {
 func New() *State {
 	return &State{
 		NativeProcs: make(map[string]NativeProc),
+		Pipes:       make(map[string]ast.BlockDecl),
 	}
 }
 
 func (rt *State) Lookup(ident *ast.Ident) NativeProc {
-	return rt.NativeProcs[ident.FullName()]
+	if fn, ok := rt.NativeProcs[ident.FullName()]; ok {
+		return fn
+	}
 }
 
-func (rt *State) Register(module string, name string, proc NativeProc) {
-	rt.NativeProcs[module+"."+name] = proc
+func (rt *State) RegisterProc(module string, name string, proc NativeProc) {
+	if module != "" {
+		rt.NativeProcs[module+"."+name] = proc
+	} else {
+		rt.NativeProcs[name] = proc
+	}
+}
+
+func (rt *State) RegisterPipe(module string, name string, decl *ast.BlockDecl) {
+	if module != "" {
+		rt.Pipes[module+"."+name] = decl
+	} else {
+		rt.Pipes[name] = decl
+	}
 }
 
 func (rt *State) Push(arg interface{}) {
 	rt.Args = append(rt.Args, arg)
 }
+
+func (rt *State) ArgInt(idx int) int64     { return rt.Args[idx].(int64) }
+func (rt *State) ArgFloat(idx int) float64 { return rt.Args[idx].(float64) }
+func (rt *State) ArgString(idx int) string { return rt.Args[idx].(string) }
 
 func (rt *State) ClearArgs() {
 	rt.Args = rt.Args[0:]
@@ -43,6 +62,11 @@ func (rt *State) RunProgram(program []byte) error {
 	if err != nil {
 		return err
 	}
+
+	for _, block := range module.Blocks {
+		rt.RegisterPipe("", block.Name.Name, block)
+	}
+
 	return rt.Run(module)
 }
 
@@ -59,11 +83,10 @@ func (rt *State) Run(module *ast.Module) error {
 			case *ast.CallExpr:
 				if proc := rt.Lookup(x.Name); proc != nil {
 					for _, arg := range x.Args {
-						argv, err := rt.evalExpr(arg)
+						err := rt.evalArg(arg)
 						if err != nil {
 							return err
 						}
-						rt.Push(argv)
 					}
 					proc(rt)
 
@@ -79,12 +102,19 @@ func (rt *State) Run(module *ast.Module) error {
 	return nil
 }
 
-func (rt *State) evalExpr(x ast.Expr) (interface{}, error) {
+func (rt *State) evalArg(x ast.Expr) error {
 	switch v := x.(type) {
 	case *ast.LiteralExpr:
-		return v.ParsedVal, nil
+		rt.Push(v.ParsedVal)
+		return nil
+	case *ast.Field:
+		err := rt.evalArg(v.Value)
+		if err != nil {
+			return err
+		}
+		return nil
 	default:
-		return nil, fmt.Errorf("unsupported expression found in args %v", x.Pos())
+		return fmt.Errorf("unsupported expression found in args")
 	}
 }
 
