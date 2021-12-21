@@ -12,6 +12,8 @@ const (
 	// Keywords
 	Return
 	Module
+	Pipe
+	Stub
 
 	// Literals
 	literal_begin

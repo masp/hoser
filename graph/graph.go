@@ -226,49 +226,6 @@ func (g *grapher) traceAssignment(assign *ast.AssignExpr, def *Definition) (valu
 	return rhs, g.unifyExpr(assign.Left, rhs)
 }
 
-func (g *grapher) unifyExpr(pattern ast.Expr, rhs value) error {
-	switch p := pattern.(type) {
-	case *ast.Ident:
-		// 1. An identifier a = b()
-		return g.unifyValue(p, rhs)
-	case *ast.Map:
-		// 2. A map a: b, c: d = v()
-		return g.unifyMap(p, rhs)
-	}
-	return grapherErr(pattern, fmt.Errorf("expected left-hand side to be map or variable names only"))
-}
-
-func (g *grapher) unifyValue(pattern *ast.Ident, rhs value) error {
-	varName := pattern.Token.Value
-	g.symbolTable[varName] = rhs
-
-	if rv, ok := rhs.(mapValue); ok {
-		if len(rv.Values) == 1 {
-			// `a = b: 5` -> `a = 5` as a simplification
-			for _, entry := range rv.Values {
-				g.symbolTable[varName] = entry
-			}
-		}
-	}
-	return nil
-}
-
-func (g *grapher) unifyMap(pattern *ast.Map, rhs value) error {
-	if rMap, ok := rhs.(mapValue); ok {
-		for _, entry := range pattern.Entries {
-			lKey := entry.Key.Token.Value
-			err := g.unifyExpr(entry.Val, rMap.Values[lKey])
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		// a: b = 10 not okay
-		return grapherErr(pattern, fmt.Errorf("mismatch between left and right hand side, value %v", rhs))
-	}
-	return nil
-}
-
 func (g *grapher) traceMap(v *ast.Map, def *Definition) (value, error) {
 	rv := mapValue{Values: make(map[string]value)}
 	for _, entry := range v.Entries {

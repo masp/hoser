@@ -51,9 +51,11 @@ func (p *parser) parseBlock() *ast.PipeDecl {
 	}
 
 	return &ast.PipeDecl{
-		Name:      name,
-		Inputs:    inputs,
-		Outputs:   outputs,
+		StubDecl: ast.StubDecl{
+			Name:    name,
+			Inputs:  inputs,
+			Outputs: outputs,
+		},
 		BegLBrack: lbrack,
 		Body:      body,
 		EndRBrack: rbrack,

@@ -55,7 +55,7 @@ func (p *parser) parseField(left ast.Expr, colon tokenInfo) *ast.Field {
 	if left, ok := left.(*ast.Ident); ok {
 		return &ast.Field{Key: left, Colon: colon.pos, Value: right}
 	} else {
-		p.expectedError(left.Pos(), "key identifier")
+		p.expectedError(left.Pos(), "name")
 	}
 	return nil
 }

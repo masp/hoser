@@ -15,11 +15,11 @@ type Loc struct {
 // main() is the root block that has zero outputs and zero inputs.
 const RootBlock BlockIdx = -1
 
-// Graph is a DAG representation of a block's body where each node represents a "block" to be executed with an ordered set of input and output ports. These ports
-// are labeled 0-N. Each node contains information about all its inputs and outputs, which are referenced by their indices. A graph component
-// is created for each block defined in the module.
+// Graph is a DAG representation of a pipe's body where each node represents a "block" to be executed with an ordered set of input and output ports. These ports
+// are labeled 0-N. Each block contains information about all its inputs and outputs, which are referenced by their indices. A graph component
+// is created for each block defined in the module and referenced externally by the tracer.
 //
-// Only numeric indices are used rather than names to keep the representation concise and avoid circular references which can create complexity.
+// Only numeric indices are used rather than names to keep the representation concise and avoid circular references.
 // The downside is that the program graph is difficult to modify in place (all indices change if anything is added or removed). Since most programs are
 // smaller, though, it is not too expensive to recalculate the whole graph each time.
 type Graph struct {
@@ -38,24 +38,24 @@ type Block interface {
 // 	A() { B(); C() }
 // 	pipe() { A() } => pipe() { B(); C() }
 type PipeBlock struct {
-	Block *PipeDecl // block name that is executed by this node, can be used to look up definition.
+	*PipeDecl // block name that is executed by this node, can be used to look up definition.
 }
 
 // LiteralBlock is a block with a single output port that evaluates constantly to the literal expression
-// This block is indivisible and cannot be expanded.
+// This block is atomic.
 type LiteralBlock struct {
-	X *LiteralExpr
+	*LiteralExpr
 }
 
-// ProcBlock refers to a block that is stubbed and is defined by an external process or Go code
-// This block is indivisible and cannot be expanded.
-type ProcBlock struct {
-	X *LiteralExpr
+// StubBlock refers to a block that is stubbed and is defined by an external process or Go code
+// This block is atomic.
+type StubBlock struct {
+	*StubDecl
 }
 
 func (b PipeBlock) block()    {}
 func (b LiteralBlock) block() {}
-func (b ProcBlock) block()    {}
+func (b StubBlock) block()    {}
 
 type EdgeType int
 

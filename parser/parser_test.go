@@ -68,20 +68,20 @@ func Test_parseExpression(t *testing.T) {
 		want ast.Expr
 	}{
 		{"Assignment", args{"a = a.b;"}, &ast.AssignExpr{
-			Lhs:   &ast.Ident{Name: "a", NamePos: 1},
-			Rhs:   &ast.Ident{Name: "b", NamePos: 7, Module: "a", ModulePos: 5},
+			Lhs:   &ast.Ident{V: "a", NamePos: 1},
+			Rhs:   &ast.Ident{V: "b", NamePos: 7, Module: "a", ModulePos: 5},
 			EqPos: 3,
 		}},
 		{"Empty Call Expr", args{"a();"}, &ast.CallExpr{
-			Name:   &ast.Ident{Name: "a", NamePos: 1},
+			Name:   &ast.Ident{V: "a", NamePos: 1},
 			Lparen: 2,
 			Args:   nil,
 			Rparen: 3,
 		}},
 		{"Assignment To Expression", args{"a = B();"}, &ast.AssignExpr{
-			Lhs: &ast.Ident{Name: "a", NamePos: 1},
+			Lhs: &ast.Ident{V: "a", NamePos: 1},
 			Rhs: &ast.CallExpr{
-				Name:   &ast.Ident{Name: "B", NamePos: 5},
+				Name:   &ast.Ident{V: "B", NamePos: 5},
 				Lparen: 6,
 				Args:   nil,
 				Rparen: 7,
@@ -89,17 +89,17 @@ func Test_parseExpression(t *testing.T) {
 			EqPos: token.Pos(3),
 		}},
 		{"Single unbound map", args{"a: b;"}, &ast.Field{
-			Key:   &ast.Ident{Name: "a", NamePos: 1},
+			Key:   &ast.Ident{V: "a", NamePos: 1},
 			Colon: 2,
-			Value: &ast.Ident{Name: "b", NamePos: 4},
+			Value: &ast.Ident{V: "b", NamePos: 4},
 		}},
 		{"Single map", args{"{a: b};"}, &ast.FieldList{
 			Opener: 1,
 			Fields: []*ast.Field{
 				{
-					Key:   &ast.Ident{Name: "a", NamePos: 2},
+					Key:   &ast.Ident{V: "a", NamePos: 2},
 					Colon: 3,
-					Value: &ast.Ident{Name: "b", NamePos: 5},
+					Value: &ast.Ident{V: "b", NamePos: 5},
 				},
 			},
 			Closer: 6,
@@ -108,14 +108,14 @@ func Test_parseExpression(t *testing.T) {
 			Opener: 1,
 			Fields: []*ast.Field{
 				{
-					Key:   &ast.Ident{Name: "a", NamePos: 2},
+					Key:   &ast.Ident{V: "a", NamePos: 2},
 					Colon: 3,
-					Value: &ast.Ident{Name: "b", NamePos: 5},
+					Value: &ast.Ident{V: "b", NamePos: 5},
 				},
 				{
-					Key:   &ast.Ident{Name: "c", NamePos: 8},
+					Key:   &ast.Ident{V: "c", NamePos: 8},
 					Colon: 9,
-					Value: &ast.Ident{Name: "d", NamePos: 11},
+					Value: &ast.Ident{V: "d", NamePos: 11},
 				},
 			},
 			Closer: 12,
@@ -124,40 +124,40 @@ func Test_parseExpression(t *testing.T) {
 			Opener: 1,
 			Fields: []*ast.Field{
 				{
-					Key:   &ast.Ident{Name: "a", NamePos: 2},
+					Key:   &ast.Ident{V: "a", NamePos: 2},
 					Colon: 3,
 					Value: &ast.FieldList{
 						Opener: 4,
 						Fields: []*ast.Field{
 							{
-								Key:   &ast.Ident{Name: "b", NamePos: 5},
+								Key:   &ast.Ident{V: "b", NamePos: 5},
 								Colon: 6,
-								Value: &ast.Ident{Name: "c", NamePos: 7},
+								Value: &ast.Ident{V: "c", NamePos: 7},
 							},
 						},
 						Closer: 8,
 					},
 				},
 				{
-					Key:   &ast.Ident{Name: "d", NamePos: 10},
+					Key:   &ast.Ident{V: "d", NamePos: 10},
 					Colon: 11,
-					Value: &ast.Ident{Name: "e", NamePos: 12},
+					Value: &ast.Ident{V: "e", NamePos: 12},
 				},
 			},
 			Closer: 13,
 		}},
 		{"Nested Call Expr", args{"a(b(d:e));"}, &ast.CallExpr{
-			Name:   &ast.Ident{Name: "a", NamePos: 1},
+			Name:   &ast.Ident{V: "a", NamePos: 1},
 			Lparen: 2,
 			Args: []ast.Expr{
 				&ast.CallExpr{
-					Name:   &ast.Ident{Name: "b", NamePos: 3},
+					Name:   &ast.Ident{V: "b", NamePos: 3},
 					Lparen: 4,
 					Args: []ast.Expr{
 						&ast.Field{
-							Key:   &ast.Ident{Name: "d", NamePos: 5},
+							Key:   &ast.Ident{V: "d", NamePos: 5},
 							Colon: 6,
-							Value: &ast.Ident{Name: "e", NamePos: 7},
+							Value: &ast.Ident{V: "e", NamePos: 7},
 						},
 					},
 					Rparen: 8,

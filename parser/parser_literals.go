@@ -12,9 +12,9 @@ func (p *parser) parseIdentifier(first tokenInfo) *ast.Ident {
 	if next.tok == token.Period {
 		p.eat()
 		name := p.eatOnly(token.Ident)
-		return &ast.Ident{Name: name.lit, NamePos: name.pos, Module: first.lit, ModulePos: first.pos}
+		return &ast.Ident{V: name.lit, NamePos: name.pos, Module: first.lit, ModulePos: first.pos}
 	}
-	return &ast.Ident{Name: first.lit, NamePos: first.pos}
+	return &ast.Ident{V: first.lit, NamePos: first.pos}
 }
 
 func (p *parser) parseLiteral(tok tokenInfo) *ast.LiteralExpr {

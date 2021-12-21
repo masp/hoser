@@ -64,7 +64,7 @@ func (rt *State) RunProgram(program []byte) error {
 	}
 
 	for _, block := range module.DefinedPipes {
-		rt.RegisterPipe("", block.Name.Name, block)
+		rt.RegisterPipe("", block.Name.V, block)
 	}
 
 	return rt.Run(module)
@@ -120,7 +120,7 @@ func (rt *State) evalArg(x ast.Expr) error {
 
 func findMainBlock(module *ast.Module) *ast.PipeDecl {
 	for _, block := range module.DefinedPipes {
-		if block.Name.Name == "main" {
+		if block.Name.V == "main" {
 			return block
 		}
 	}

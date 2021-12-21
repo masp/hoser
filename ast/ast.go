@@ -4,7 +4,7 @@ import (
 	"github.com/masp/hoser/token"
 )
 
-// A hoser module is a set of function definitions. Functions can be either:
+// A hoser module is a set of pipe definitions. Pipes are componsed of blocks. A block can be either:
 // - Pure (no inputs, no outputs)
 // - Sources (no inputs, only outputs)
 // - Sinks (only inputs, no outputs)
@@ -63,10 +63,22 @@ func (m *Module) End() token.Pos {
 	}
 }
 
+type StubDecl struct {
+	Name    *Ident
+	Inputs  *FieldList
+	Outputs *FieldList
+}
+
+func (b *StubDecl) Pos() token.Pos {
+	return b.Name.Pos()
+}
+
+func (b *StubDecl) End() token.Pos {
+	return b.Outputs.End()
+}
+
 type PipeDecl struct {
-	Name      *Ident
-	Inputs    *FieldList
-	Outputs   *FieldList
+	StubDecl
 	BegLBrack token.Pos
 	Body      []Stmt
 	EndRBrack token.Pos
@@ -79,19 +91,12 @@ func (b *PipeDecl) Pos() token.Pos {
 }
 
 func (b *PipeDecl) End() token.Pos {
-	if b.IsStub() {
-		return b.Outputs.End()
-	} else {
-		return b.EndRBrack
-	}
-}
-
-func (b *PipeDecl) IsStub() bool {
-	return b.BegLBrack.IsValid()
+	return b.EndRBrack
 }
 
 func (m *Module) declNode()   {}
 func (m *PipeDecl) declNode() {}
+func (m *StubDecl) declNode() {}
 
 // ----------------------------------------------------------------------------
 // Expressions
@@ -100,7 +105,7 @@ func (m *PipeDecl) declNode() {}
 // Field is a key-value combination like 'key: value' that shows up in pipe definitions and pattern
 // matching.
 type Field struct {
-	Key   Expr
+	Key   *Ident
 	Colon token.Pos
 	Value Expr
 }
@@ -175,7 +180,7 @@ func (p *ParenExpr) End() token.Pos {
 }
 
 type Ident struct {
-	Name      string // Name is the string value of the ident (= Run in mod.Run())
+	V         string // V is the string value of the ident (= Run in mod.Run())
 	NamePos   token.Pos
 	Module    string // Module is mod in mod.Run(), if unscoped Module="" and ModulePos=NoPos
 	ModulePos token.Pos
@@ -186,14 +191,18 @@ func (i *Ident) Pos() token.Pos {
 }
 
 func (i *Ident) End() token.Pos {
-	return i.NamePos + token.Pos(len(i.Name))
+	return i.NamePos + token.Pos(len(i.V))
+}
+
+func (i *Ident) Local() bool {
+	return !i.ModulePos.IsValid()
 }
 
 func (i *Ident) FullName() string {
-	if i.ModulePos != token.NoPos {
-		return i.Module + "." + i.Name
+	if i.Local() {
+		return i.V
 	}
-	return i.Name
+	return i.Module + "." + i.V
 }
 
 type LiteralExpr struct {
