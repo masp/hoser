@@ -5,20 +5,48 @@ import (
 	"github.com/masp/hoser/token"
 )
 
-func (p *parser) parseModule() *ast.Module {
+func (p *parser) parseModuleHeader() *ast.Module {
 	p.eatOnly(token.Module)
-	name := p.parseIdentifier(p.eat())
+	name := p.parseLiteral(p.eat())
+	if name.Type != token.String {
+		p.expectedError(name.Pos(), "module name as a quoted string")
+	}
 
-	module := &ast.Module{
+	return &ast.Module{
 		Name: name,
 	}
+}
+
+func (p *parser) parseModule() (module *ast.Module) {
+	module = p.parseModuleHeader()
 	for {
 		p.eatAll(token.Semicolon)
-		block := p.parseBlock()
 
-		if block == nil {
-			return module // no more blocks
+		keyword := p.eat()
+		switch keyword.tok {
+		case token.Import:
+			imp := p.parseImport()
+			module.Imports = append(module.Imports, &imp)
+		case token.Pipe:
+			pipe := p.parsePipeBlock()
+			module.DefinedBlocks = append(module.DefinedBlocks, &pipe)
+		case token.Stub:
+			stub := p.parseStubBlock()
+			module.DefinedBlocks = append(module.DefinedBlocks, &stub)
+		case token.Eof:
+			return
+		default:
+			p.expectedError(keyword, "import/pipe/stub")
+			return
 		}
-		module.DefinedPipes = append(module.DefinedPipes, block)
 	}
+}
+
+func (p *parser) parseImport() (imp ast.ImportDecl) {
+	importArg := p.eat()
+	imp.ModuleName = p.parseLiteral(importArg)
+	if imp.ModuleName.Type != token.String {
+		p.expectedError(importArg, "string module path")
+	}
+	return
 }

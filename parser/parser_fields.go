@@ -30,11 +30,13 @@ func flip(tok token.Token) token.Token {
 	}
 }
 
-func (p *parser) parseFieldList(opener tokenInfo) (result *ast.FieldList) {
+func (p *parser) parseFieldList(opener tokenInfo) (result ast.FieldList) {
+	result.Opener = opener.pos
 	closerTok := flip(opener.tok)
+
 	next := p.peek()
-	result = &ast.FieldList{Opener: opener.pos, Fields: nil, Closer: next.pos}
 	for next.tok != closerTok {
+		p.eatAll(token.Comma)
 		arg := p.parseExpression(token.Invalid)
 		if ent, ok := arg.(*ast.Field); ok {
 			result.Fields = append(result.Fields, ent)
@@ -43,8 +45,6 @@ func (p *parser) parseFieldList(opener tokenInfo) (result *ast.FieldList) {
 		}
 		next = p.peek()
 	}
-
-	result.Opener = opener.pos
 	result.Closer = p.eatOnly(closerTok).pos
 	return
 }

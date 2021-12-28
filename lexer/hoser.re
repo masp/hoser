@@ -46,6 +46,7 @@ func (s *Scanner) lex() (pos token.Pos, tok token.Token, lit string, err error) 
 		"module" { tok = token.Module; lit = "module"; return }
 		"pipe" { tok = token.Pipe; lit = "pipe"; return }
 		"stub" { tok = token.Stub; lit = "stub"; return }
+		"import" { tok = token.Import; lit = "import"; return }
 
 		// Operators and punctuation
 		"(" { tok = token.LParen; lit = "("; return }

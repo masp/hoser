@@ -30,6 +30,14 @@ var (
 	ErrExpectedExpression = errors.New("expected expression")
 )
 
+func ParseModuleHeader(file *token.File, src []byte) (module *ast.Module, err error) {
+	scanner := lexer.NewScanner(file, src)
+	p := parser{file: file, scanner: scanner}
+	defer p.handleErrors(&err)
+	module = p.parseModuleHeader()
+	return
+}
+
 func ParseModule(file *token.File, src []byte) (module *ast.Module, err error) {
 	scanner := lexer.NewScanner(file, src)
 	p := parser{file: file, scanner: scanner}
@@ -38,11 +46,11 @@ func ParseModule(file *token.File, src []byte) (module *ast.Module, err error) {
 	return
 }
 
-func ParseBlock(file *token.File, src []byte) (block *ast.PipeDecl, err error) {
+func ParseBlock(file *token.File, src []byte) (block ast.PipeDecl, err error) {
 	scanner := lexer.NewScanner(file, src)
 	p := parser{file: file, scanner: scanner}
 	defer p.handleErrors(&err)
-	block = p.parseBlock()
+	block = p.parsePipeBlock()
 	return
 }
 
@@ -146,7 +154,7 @@ func (p *parser) eatAll(expected token.Token) {
 
 func precedence(kind token.Token) int {
 	switch kind {
-	case token.Semicolon:
+	case token.Semicolon, token.Eof:
 		return -1 // End of expression always
 	case token.Invalid:
 		return 0 // lexer.Invalid is a special token meaning no parent
@@ -170,7 +178,7 @@ func (p *parser) parseExpression(parent token.Token) ast.Expr {
 	left := p.parsePrefix()
 	for {
 		next := p.peek()
-		if precedence(parent) >= precedence(next.tok) {
+		if precedence(parent) >= precedence(next.tok) || next.tok == token.Eof {
 			return left
 		}
 
@@ -189,7 +197,8 @@ func (p *parser) parsePrefix() ast.Expr {
 	case token.String, token.Integer, token.Float:
 		return p.parseLiteral(next)
 	case token.LCurlyBrack:
-		return p.parseFieldList(next)
+		fields := p.parseFieldList(next)
+		return &fields
 	default:
 		p.error(next.pos, fmt.Errorf("expected expression got %v", next.tok))
 		return nil

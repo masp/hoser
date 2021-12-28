@@ -82,8 +82,8 @@ func (p Pos) IsValid() bool {
 // A File has a name, size, and line offset table.
 //
 type File struct {
-	name string // file name as provided to AddFile
-	size int    // file size as provided to AddFile
+	Name string // file name as provided
+	Size int    // file size in bytes
 
 	lineMut *sync.Mutex // guards lines for threadsafe access
 	lines   []int       // lines contains the offset of the first character for each line (the first entry is always 0)
@@ -91,23 +91,13 @@ type File struct {
 
 func NewFile(name string, size int) File {
 	f := File{
-		name:    name,
-		size:    size,
+		Name:    name,
+		Size:    size,
 		lineMut: &sync.Mutex{},
 		lines:   nil,
 	}
 	f.AddLine(-1) // implicit newline at the start of a file
 	return f
-}
-
-// Name returns the file name of file f as registered with AddFile.
-func (f *File) Name() string {
-	return f.name
-}
-
-// Size returns the size of file f as registered with AddFile.
-func (f *File) Size() int {
-	return f.size
 }
 
 // LineCount returns the number of lines in file f.
@@ -124,7 +114,7 @@ func (f *File) LineCount() int {
 //
 func (f *File) AddLine(offset int) {
 	f.lineMut.Lock()
-	if i := len(f.lines); (i == 0 || f.lines[i-1] < offset) && offset < f.size {
+	if i := len(f.lines); (i == 0 || f.lines[i-1] < offset) && offset < f.Size {
 		f.lines = append(f.lines, offset+1) // +1 since we want to put it at the start of the new line
 	}
 	f.lineMut.Unlock()
@@ -135,8 +125,8 @@ func (f *File) AddLine(offset int) {
 // f.Pos(f.Offset(p)) == p.
 //
 func (f *File) Pos(offset int) Pos {
-	if offset > f.size {
-		panic(fmt.Sprintf("invalid file offset %d (should be <= %d)", offset, f.size))
+	if offset > f.Size {
+		panic(fmt.Sprintf("invalid file offset %d (should be <= %d)", offset, f.Size))
 	}
 	return Pos(offset + 1)
 }
@@ -154,11 +144,11 @@ func (f *File) Line(p Pos) int {
 // p must be a Pos value in f or NoPos.
 //
 func (f *File) Position(p Pos) (pos Position) {
-	pos = Position{Filename: f.Name(), Offset: p}
+	pos = Position{Filename: f.Name, Offset: p}
 	if p != NoPos {
 		offset := int(p)
-		if offset <= 0 || offset > f.size {
-			panic(fmt.Sprintf("invalid Pos value %d (should be in [%d, %d])", p, 1, f.size))
+		if offset <= 0 || offset > f.Size {
+			panic(fmt.Sprintf("invalid Pos value %d (should be in [%d, %d])", p, 1, f.Size))
 		}
 		f.lineMut.Lock()
 		if i := sort.SearchInts(f.lines, offset) - 1; i >= 0 {

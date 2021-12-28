@@ -49,6 +49,7 @@ func NewScanner(file *token.File, text []byte) *Scanner {
 	// Insert null character at end if none exists for lexer to know when to terminate
 	if text[len(text)-1] != '\x00' {
 		text = append(text, '\x00')
+		file.Size += 1
 	}
 	return &Scanner{
 		file:   file,
@@ -59,6 +60,10 @@ func NewScanner(file *token.File, text []byte) *Scanner {
 }
 
 func (s *Scanner) Next() (pos token.Pos, tok token.Token, lit string) {
+	if s.prevToken == token.Eof {
+		return token.Pos(len(s.text)), token.Eof, ""
+	}
+
 	pos, tok, lit, err := s.lex()
 	if err != nil {
 		s.Errors.Add(s.file.Position(pos), err)

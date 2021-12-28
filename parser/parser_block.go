@@ -18,81 +18,34 @@ var (
 	EmptyFnBody = []ast.Expr{}
 )
 
-func (p *parser) parseBlock() *ast.PipeDecl {
-	ident := p.eat()
-	if ident.tok == token.Eof {
-		return nil // No more blocks, so we finish
-	} else if ident.tok != token.Ident {
-		p.eatOnly(token.Ident) // use error handling in eatOnly
-		return nil             // TODO: return badblock
-	}
-	name := p.parseIdentifier(ident)
-
-	inputs := p.parseArgs()
+func (p *parser) parseStubBlock() (stub ast.StubDecl) {
+	stub.Name = p.parseIdentifier(p.eatOnly(token.Ident))
+	stub.Inputs = p.parseArgs()
 
 	// output is optional
 	// e.g. `main() () {}`` is equivalent to `main() {}`
 	next := p.peek()
-	var outputs *ast.FieldList
 	if next.tok == token.LParen {
 		// parse output definition
-		outputs = p.parseArgs()
+		stub.Outputs = p.parseArgs()
 	}
+	return
+}
 
-	var body []ast.Stmt
-	var lbrack, rbrack token.Pos
-	next = p.peek()
-	if next.tok == token.LCurlyBrack {
-		lbrack = p.eatOnly(token.LCurlyBrack).pos
-		body = p.parseFnBody()
-		rbrack = p.eatOnly(token.RCurlyBrack).pos
-	} else if next.tok != token.Eof && next.tok != token.Semicolon {
-		p.expectedError(next, "'{' or end of line")
-	}
-
-	return &ast.PipeDecl{
-		StubDecl: ast.StubDecl{
-			Name:    name,
-			Inputs:  inputs,
-			Outputs: outputs,
-		},
-		BegLBrack: lbrack,
-		Body:      body,
-		EndRBrack: rbrack,
-	}
+func (p *parser) parsePipeBlock() (pipe ast.PipeDecl) {
+	pipe.StubDecl = p.parseStubBlock()
+	pipe.BegLBrack = p.eatOnly(token.LCurlyBrack).pos
+	pipe.Body = p.parseFnBody()
+	pipe.EndRBrack = p.eatOnly(token.RCurlyBrack).pos
+	return
 }
 
 // parseArgs takes either the input or output arguments specification and converts it to a Map
 // example:
 // ([name: string, value: int]) -> Map{{Key: name, Val: string}, {Key: value, Val: int}}
-func (p *parser) parseArgs() *ast.FieldList {
-	lparen := p.eatOnly(token.LParen).pos
-	var rparen token.Pos
-
-	next := p.peek()
-
-	var fields []*ast.Field
-	if next.tok != token.RParen {
-		args := p.parseExpression(token.Invalid)
-
-		rparen = p.eatOnly(token.RParen).pos
-
-		switch ent := args.(type) {
-		case *ast.FieldList:
-			fields = ent.Fields
-		case *ast.Field:
-			fields = []*ast.Field{ent}
-		default:
-			p.error(next.pos, ErrInputOutputNotMap)
-		}
-	} else {
-		rparen = p.eat().pos
-	}
-	return &ast.FieldList{
-		Opener: lparen,
-		Fields: fields,
-		Closer: rparen,
-	}
+func (p *parser) parseArgs() ast.FieldList {
+	opener := p.eatOnly(token.LParen)
+	return p.parseFieldList(opener)
 }
 
 func (p *parser) parseFnBody() []ast.Stmt {
@@ -100,7 +53,7 @@ func (p *parser) parseFnBody() []ast.Stmt {
 	for {
 		exprTok := p.peek()
 
-		if exprTok.tok == token.RCurlyBrack {
+		if exprTok.tok == token.RCurlyBrack || exprTok.tok == token.Eof {
 			break // no more expressions in body
 		}
 		exprs = append(exprs, p.parseStmt())

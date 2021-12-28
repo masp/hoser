@@ -12,13 +12,13 @@ func Walk(node Node, v Visitor) {
 	switch n := node.(type) {
 	case *Module:
 		Walk(n.Name, v)
-		for _, block := range n.DefinedPipes {
+		for _, block := range n.DefinedBlocks {
 			Walk(block, v)
 		}
 	case *PipeDecl:
 		Walk(n.Name, v)
-		Walk(n.Inputs, v)
-		Walk(n.Outputs, v)
+		Walk(&n.Inputs, v)
+		Walk(&n.Outputs, v)
 		for _, stmt := range n.Body {
 			Walk(stmt, v)
 		}

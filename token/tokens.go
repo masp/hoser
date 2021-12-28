@@ -14,6 +14,7 @@ const (
 	Module
 	Pipe
 	Stub
+	Import
 
 	// Literals
 	literal_begin
@@ -47,6 +48,9 @@ var tokens = [...]string{
 	// Keywords
 	Return: "return",
 	Module: "module",
+	Pipe:   "pipe",
+	Stub:   "stub",
+	Import: "import",
 
 	// Literals
 	Ident:   "IDENT",

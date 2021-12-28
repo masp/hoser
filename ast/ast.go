@@ -44,11 +44,20 @@ type Expr interface {
 // Declarations
 //
 
+// BlockDecl is either a stub or a pipe
+type BlockDecl interface {
+	Decl
+	BlockName() string
+	BlockInputs() *FieldList
+	BlockOutputs() *FieldList
+}
+
 // Module represents all the contents of a single file, including all defined blocks and all referenced blocks.
 type Module struct {
-	ModulePos    token.Pos // position of module keyword
-	Name         *Ident    // name of module identifier
-	DefinedPipes []*PipeDecl
+	ModulePos     token.Pos     // position of module keyword
+	Name          *LiteralExpr  // name of module identifier as a string literal
+	Imports       []*ImportDecl // list of imported modules
+	DefinedBlocks []BlockDecl
 }
 
 func (m *Module) Pos() token.Pos {
@@ -56,17 +65,39 @@ func (m *Module) Pos() token.Pos {
 }
 
 func (m *Module) End() token.Pos {
-	if len(m.DefinedPipes) > 0 {
-		return m.DefinedPipes[len(m.DefinedPipes)-1].End()
+	if len(m.DefinedBlocks) > 0 {
+		return m.DefinedBlocks[len(m.DefinedBlocks)-1].End()
 	} else {
 		return m.Name.End()
 	}
 }
 
+func (m *Module) Lookup(name string) BlockDecl {
+	for _, decl := range m.DefinedBlocks {
+		if decl.BlockName() == name {
+			return decl
+		}
+	}
+	return nil
+}
+
+type ImportDecl struct {
+	Keyword    token.Pos
+	ModuleName *LiteralExpr // import "ModuleName"
+}
+
+func (b *ImportDecl) Pos() token.Pos {
+	return b.Keyword
+}
+
+func (b *ImportDecl) End() token.Pos {
+	return b.ModuleName.End()
+}
+
 type StubDecl struct {
 	Name    *Ident
-	Inputs  *FieldList
-	Outputs *FieldList
+	Inputs  FieldList
+	Outputs FieldList
 }
 
 func (b *StubDecl) Pos() token.Pos {
@@ -94,9 +125,17 @@ func (b *PipeDecl) End() token.Pos {
 	return b.EndRBrack
 }
 
-func (m *Module) declNode()   {}
-func (m *PipeDecl) declNode() {}
-func (m *StubDecl) declNode() {}
+func (b *PipeDecl) BlockName() string        { return b.Name.V }
+func (b *PipeDecl) BlockInputs() *FieldList  { return &b.Inputs }
+func (b *PipeDecl) BlockOutputs() *FieldList { return &b.Outputs }
+func (b *StubDecl) BlockName() string        { return b.Name.V }
+func (b *StubDecl) BlockInputs() *FieldList  { return &b.Inputs }
+func (b *StubDecl) BlockOutputs() *FieldList { return &b.Outputs }
+
+func (m *Module) declNode()     {}
+func (m *ImportDecl) declNode() {}
+func (m *PipeDecl) declNode()   {}
+func (m *StubDecl) declNode()   {}
 
 // ----------------------------------------------------------------------------
 // Expressions

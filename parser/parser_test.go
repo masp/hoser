@@ -13,8 +13,8 @@ func TestValid(t *testing.T) {
 	tests := []struct {
 		src string
 	}{
-		{`module test; main() () {}`},
-		{"module test; B1(a: b) {}\nB2() (v: d) {}"},
+		{`module "test"; import "a"; pipe main() () {}`},
+		{`module "test"; pipe B1(a: b) {}; pipe B2() (v: d) {}`},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%q", tt.src), func(t *testing.T) {
@@ -77,6 +77,20 @@ func Test_parseExpression(t *testing.T) {
 			Lparen: 2,
 			Args:   nil,
 			Rparen: 3,
+		}},
+		{"Call Expr 2 Args", args{"a(c,d,a:b);"}, &ast.CallExpr{
+			Name:   &ast.Ident{V: "a", NamePos: 1},
+			Lparen: 2,
+			Args: []ast.Expr{
+				&ast.Ident{V: "c", NamePos: 3},
+				&ast.Ident{V: "d", NamePos: 5},
+				&ast.Field{
+					Key:   &ast.Ident{V: "a", NamePos: 7},
+					Colon: 8,
+					Value: &ast.Ident{V: "b", NamePos: 9},
+				},
+			},
+			Rparen: 10,
 		}},
 		{"Assignment To Expression", args{"a = B();"}, &ast.AssignExpr{
 			Lhs: &ast.Ident{V: "a", NamePos: 1},
